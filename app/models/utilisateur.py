@@ -6,10 +6,13 @@ import enum
 
 class TypeCompteEnum(enum.Enum):
   admin = "admin"
-  user = "user, free, premium"
+  user = "user"
+  free = "free"
+  premium = "premium"
 
-class User(db.Model):
-    _TableName_= "users"
+class Utilisateur(db.Model):
+    __tablename__= "utilisateurs"
+
     id = db.Column(db.Integer, primary_key=True)
     nom = db.Column(db.String(50), nullable=False)
     prenom = db.Column(db.String(50), nullable=False)
@@ -20,4 +23,4 @@ class User(db.Model):
     actif = db.Column(db.Boolean, default=True, nullable=False)
 
     def __repr__(self):
-        return f"<User {self.email}> "
+        return f"<Utilisateur {self.email}> "

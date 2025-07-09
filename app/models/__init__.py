@@ -1,1 +1,2 @@
-from .user import User  # Import explicite de la classe User
+from .utilisateur import Utilisateur
+from .projet import Projet

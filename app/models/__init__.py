@@ -1,2 +1,3 @@
 from .utilisateur import Utilisateur
 from .projet import Projet
+from .modelIA import ModelIA

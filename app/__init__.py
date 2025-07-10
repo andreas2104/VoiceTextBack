@@ -2,6 +2,7 @@ from flask import Flask
 from .extensions import db, migrate
 from app.routes.utilisateur_routes import utilisateur_bp
 from app.routes.projet_routes import projet_bp
+from app.routes.modelIA_routes import modelIA_bp
 from dotenv import load_dotenv
 import os
 
@@ -21,5 +22,6 @@ def create_app():
   
   app.register_blueprint(utilisateur_bp, url_prefix='/api/utilisateurs')
   app.register_blueprint(projet_bp, url_prefix='/api/projets')
+  app.register_blueprint(modelIA_bp, url_prefix='/api/modelIA')
 
   return app

@@ -36,21 +36,27 @@ def get_utilisateur_by_id(utilisateur_id):
     }), 200    
 
 
-def create_utilisateur(data):
+def create_utilisateur():
     data = request.json
     if not data or not all(key in data for key in ['nom', 'prenom', 'email', 'mot_de_passe']):
         return {"error": "Missing required fields"}, 400
     
     try:
-        hashed_password =  generate_password_hash(data['mot_de_passe'])
+        hashed_password = generate_password_hash(data['mot_de_passe'])
+        type_compte = data.get('type_compte', TypeCompteEnum.user)
+        if isinstance(type_compte, str):
+            try:
+                type_compte = TypeCompteEnum(type_compte)
+            except ValueError:
+                return jsonify({"error": "Invalid type_compte"}), 400
+        
         new_utilisateur = Utilisateur(
             nom=data['nom'],
             prenom=data['prenom'],
             email=data['email'],
             mot_de_passe=hashed_password,
-            type_compte=data.get('type_compte', TypeCompteEnum.user),
+            type_compte=type_compte,
             actif=data.get('actif', True)
-            
         )
         db.session.add(new_utilisateur)
         db.session.commit()

@@ -11,7 +11,7 @@ def get_all_template():
       'nom_template' : t.nom_template,
       'structure': t.structure,
       'variables' : t.structure,
-      'type_sortie' : t.type,
+      'type_sortie' : t.type_sortie,
       'public' : t.public,
       'date_creation' : t.date_creation.isoformat(),
 
@@ -26,8 +26,8 @@ def get_template_by_id(template_id):
    'id': t.id,
       'nom_template' : t.nom_template,
       'structure': t.structure,
-      'variables' : t.structure,
-      'type_sortie' : t.type,
+      'variables' : t.variables,
+      'type_sortie' : t.type_sortie,
       'public' : t.public,
       'date_creation' : t.date_creation.isoformat(),
 }), 200
@@ -44,7 +44,7 @@ def create_template():
       variables=data['variables'],
       type_sortie=data['type_sortie'],
       public=data['public'],
-      date_creation=data['data_creation']      
+      date_creation=data['date_creation']      
     )
     db.session.add(new_template)
     db.session.commit()

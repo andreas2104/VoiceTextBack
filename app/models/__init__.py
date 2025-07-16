@@ -3,3 +3,4 @@ from .projet import Projet
 from .modelIA import ModelIA
 from .template import Template
 from .prompt import Prompt
+from .contenu import Contenu

@@ -21,4 +21,4 @@ class ModelIA(db.Model):
     actif = db.Column(db.Boolean, default=True, nullable=False)
 
     def __repr__(self):
-        return f"<ModelIA {self.id}: {self.nom_model} - {self.type_model} - {self.fournisseur}>"
+        return f"<ModelIA {self.id}: {self.nom_model} - {self.type_model} - {self.fournisseur}>"cd 

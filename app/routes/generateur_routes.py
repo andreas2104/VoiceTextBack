@@ -1,10 +1,8 @@
 from flask import Blueprint
 from app.controllers import generateur_controller
-from flask import request
 
-generateur_bp = Blueprint('generateur_bp', __name__)
+ollama_bp = Blueprint('ollama', __name__)
 
-@generateur_bp.route("/", methods=["POST"])
-def create_contenu():
-  return generateur_controller.generer_contenu()
-
+@ollama_bp.route('/', methods=['POST'])
+def handle_ollama():
+    return generateur_controller.ollama_test()

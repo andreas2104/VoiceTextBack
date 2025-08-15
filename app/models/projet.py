@@ -4,16 +4,14 @@ from sqlalchemy import Enum
 import enum
 import json
 
-
 class TypeStatusEnum(enum.Enum):
    draft = "draft"
    active = "active"
    archived = "archived"
-
 class Projet(db.Model):
    __tablename__ = "projets"
 
-   id = db.Column(db.Integer, primary_key=True)
+   id = db.Column(db.Integer, primary_key=True,autoincrement=True)
    id_utilisateur = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'))
    nom_projet = db.Column(db.String(100), nullable=False)
    description = db.Column(db.String(300), nullable=True)

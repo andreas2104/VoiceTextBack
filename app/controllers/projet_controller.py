@@ -5,8 +5,6 @@ from datetime import datetime
 from sqlalchemy.exc import SQLAlchemyError
 import json
 
-
-
 def get_all_projet():
     try:
         projets = Projet.query.all()
@@ -42,12 +40,10 @@ def get_projet_by_id(projet_id):
 
 def create_projet():
     data = request.get_json()
-    required_fields = ['id_utilisateur', 'nom_projet', 'description', 'configuration']
+    required_fields = ['id_utilisateur', 'nom_projet', 'description']
     if not data or not all(field in data for field in required_fields):
         return jsonify({"error": "Missing required fields"}), 400
-
     try:
-
         configuration = data.get('configuration')
         if isinstance(configuration, str):
             try:
@@ -67,7 +63,7 @@ def create_projet():
             nom_projet=data['nom_projet'],
             description=data['description'],
             status=status,
-            configuration=data.get('configuration'),
+            configuration=configuration,
             date_modification=None  
         )
 

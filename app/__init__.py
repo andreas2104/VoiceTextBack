@@ -1,4 +1,5 @@
 from flask import Flask
+from flask_cors import CORS
 from .extensions import db, migrate
 from app.routes.utilisateur_routes import utilisateur_bp
 from app.routes.projet_routes import projet_bp
@@ -10,12 +11,18 @@ from app.routes.contenu_routes import contenu_bp
 from dotenv import load_dotenv
 import os
 
+
 def create_app():
   load_dotenv()
 
   app = Flask(__name__)
+  CORS(app,
+      resources={r"/api/*": {"origins": "http://localhost:3000"}},
+      supports_credentials=True,
+      allow_headers=["Content-Type", "Authorization"],
+      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
-  
+  # app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "default_secret_key")
   app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DB_URL")
   app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
   

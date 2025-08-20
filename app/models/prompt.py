@@ -6,7 +6,7 @@ class Prompt(db.Model):
   __tablename__ = "prompt"
 
   id = db.Column(db.Integer, primary_key=True)
-  id_utilisateur = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'))
+  id_utilisateur = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable = True)
   nom_prompt = db.Column(db.String(100), nullable=False)
   texte_prompt = db.Column(db.Text, nullable=False)
   parametres = db.Column(db.JSON, nullable=True)
@@ -17,3 +17,4 @@ class Prompt(db.Model):
 
   def __repr__(self):
     return f"<Prompt {self.id}: {self.nom_prompt}>"
+  # migration a refaire

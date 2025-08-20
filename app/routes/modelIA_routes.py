@@ -8,8 +8,8 @@ modelIA_bp = Blueprint('modelIA_bp', __name__)
 
 
 @modelIA_bp.route("/", methods=["GET"])
-def test_route():
-    return "Connection works!", 200
+def get_all_modelIA():
+    return modelIA_controller.get_all_modelIA()
 
 @modelIA_bp.route("/", methods=["POST"])
 def create_modelIA():

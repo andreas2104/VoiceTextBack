@@ -16,3 +16,14 @@ class Template(db.Model):
 
   def __repr__(self):
     return f"<Template {self.id}: {self.nom_template}>"
+  
+  def to_dict(self):
+    return {
+      'id': self.id,
+      'nom_template':self.nom_template,
+      'structure': self.structure,
+      'variables': self.variables,
+      'type_sortie': self.variables,
+      'public': self.public,
+      'date_creation': self.date_creation.isoformat() if self.date_creation else None,
+    }

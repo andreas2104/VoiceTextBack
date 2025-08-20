@@ -5,7 +5,6 @@ from sqlalchemy.exc import SQLAlchemyError
 import json
 
 
-
 def get_all_modelIA():
   try: 
     models = ModelIA.query.all()

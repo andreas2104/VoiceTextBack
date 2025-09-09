@@ -1,5 +1,6 @@
 import os
-from flask import Blueprint, request, jsonify
+import requests
+from flask import request, jsonify
 from app.extensions import db
 from app.models.contenu import Contenu, TypeContenuEnum
 from app.models.prompt import Prompt
@@ -7,218 +8,195 @@ from app.models.modelIA import ModelIA
 from app.models.template import Template
 from datetime import datetime
 from gpt4all import GPT4All
+from sqlalchemy.exc import SQLAlchemyError
 
-
-import requests
-import os
-
-bp_ai = Blueprint("bp_ai", __name__)
-
+# Singleton GPT4All
 _gpt4all_instance = None
-
-def get_gpt4all_instance(model_name):
+def get_gpt4all_instance():
     global _gpt4all_instance
     if _gpt4all_instance is None:
-        _gpt4all_instance = GPT4All(model_name=model_name)
+        model_path = os.path.expanduser("~/.cache/gpt4all/orca-mini-3b-gguf2-q4_0.gguf")
+        _gpt4all_instance = GPT4All(
+            "orca-mini-3b-gguf2-q4_0.gguf",
+            model_path=os.path.dirname(model_path)
+        )
+        print(f"✅ Modèle GPT4All chargé : {model_path}")
     return _gpt4all_instance
 
-def detect_content_type(model: ModelIA, prompt_text: str):
-    if hasattr(model, "modalite"):
-        modalite = model.modalite.lower()
-        if modalite in ["image", "vision"]:
-            return TypeContenuEnum.image
-        elif modalite in ["text", "texte"]:
-            return TypeContenuEnum.text
-    
-    keywords_image = ["image", "photo", "dessin", "illustration", "art"]
-    if any(word in prompt_text.lower() for word in keywords_image):
-        return TypeContenuEnum.image
-    
-    return TypeContenuEnum.text
 
-def get_api_key(fournisseur: str):
-    match fournisseur.lower():
-        case "gpt":
-            return os.getenv("API_KEY_OPENAI")
-        case "groq":
-            return os.getenv("API_KEY_GROQ")
-        case "deepseek":
-            return os.getenv("API_KEY_DEEPSEEK")
-        case "openrouter":
-            return os.getenv("API_KEY_OPEN_ROUTER")
-        case "gemini":
-            return os.getenv("API_KEY_GEMINI")
-        case "huggingface":
-            return os.getenv("API_KEY_HUGGING_FACE")
-        case "ollama" | "gpt4all":
-            return None  # Pas de clé API nécessaire pour ces fournisseurs
-        case _:
-            return None
+# ---------- APPELS AUX MODELS ----------
+def call_gpt4all(prompt_text, temperature=0.7, max_tokens=512):
+    try:
+        llm = get_gpt4all_instance()
+        with llm.chat_session():
+            response = llm.generate(prompt_text, max_tokens=max_tokens, temp=temperature)
+        return {"type": "text", "content": response}
+    except Exception as e:
+        return {"type": "error", "content": f"Erreur GPT4All: {str(e)}"}
 
-def call_model_api_local(model, prompt_text, params):
-    gpt = get_gpt4all_instance(model.nom_model)
-
-    response = gpt.generate(
-        prompt=prompt_text,
-        n_predict=params.get("max_tokens", 100),
-        temperature=params.get("temperature", 0.7)
-    )
-    return {"type":"text", "content": response}
-
-def call_model_api_huggingface(prompt_text, max_tokens=100, temperature=0.7):
-    API_URL = "https://api-inference.huggingface.co/models/gpt2"  
-    
-    headers = {
-        "Authorization": f"Bearer {os.getenv('API_KEY_HUGGING_FACE')}",
-        "Content-Type": "application/json"
-    }
+def call_gpt3(prompt_text, api_key, temperature=0.7, max_tokens=512):
+    url = "https://api.openai.com/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
-        "inputs": prompt_text,
-        "parameters": {
-            "max_new_tokens": max_tokens,
-            "temperature": temperature,
-            "do_sample": True
-        }
+        "model": "gpt-3.5-turbo",
+        "messages": [{"role": "user", "content": prompt_text}],
+        "temperature": temperature,
+        "max_tokens": max_tokens
     }
     try:
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
-        response.raise_for_status()
-        data = response.json()
-   
-        if isinstance(data, list) and "generated_text" in data[0]:
-            return {"type": "text", "content": data[0]["generated_text"]}
-        else:
-            return {"type": "error", "content": "Réponse inattendue de HuggingFace"}
+        r = requests.post(url, headers=headers, json=payload, timeout=60)
+        r.raise_for_status()
+        data = r.json()
+        return {"type": "text", "content": data["choices"][0]["message"]["content"]}
     except Exception as e:
-        return {"type": "error", "content": f"Erreur HuggingFace: {str(e)}"}
+        return {"type": "error", "content": f"Erreur GPT-3: {str(e)}"}
 
-def call_model_api(model: ModelIA, prompt_text: str, params: dict):
-    fournisseur = model.fournisseur.lower()
-
-    if fournisseur == "gpt4all":
-        return call_model_api_local(model, prompt_text, params)
-    
-    if fournisseur == "huggingface":
-        return call_model_api_huggingface(
-            prompt_text,
-            max_tokens=params.get("max_tokens", 100),
-            temperature=params.get("temperature", 0.7)
-        )
-
-    headers = {"Content-Type": "application/json"}
-    if fournisseur != "ollama" and params.get("api_key"):
-        headers["Authorization"] = f"Bearer {params['api_key']}"
-
-    payload = {}
-    if fournisseur == "ollama":
-        payload = {
-            "model": model.parametres_default.get("model", model.nom_model),
-            "prompt": prompt_text,
-            "stream": False,
-            "temperature": params.get("temperature", 0.7)
-        }
-    elif fournisseur in ["openrouter", "gpt", "groq", "deepseek"]:
-        payload = {
-            "model": model.parametres_default.get("model", model.nom_model),
-            "messages": [{"role": "user", "content": prompt_text}],
-            "temperature": params.get("temperature", 0.7),
-            "max_tokens": params.get("max_tokens", 100)
-        }
-    elif fournisseur == "gemini":
-        payload = {
-            "contents": [{"parts": [{"text": prompt_text}]}],
-            "generationConfig": {
-                "temperature": params.get("temperature", 0.7),
-                "maxOutputTokens": params.get("max_tokens", 100)
-            }
-        }
-    else:
-        return {"type": "error", "content": f"Fournisseur inconnu : {fournisseur}"}
-
+def call_grok(prompt_text, api_key, temperature=0.7, max_tokens=512):
+    url = "https://api.x.ai/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": "grok-beta",
+        "messages": [{"role": "user", "content": prompt_text}],
+        "temperature": temperature,
+        "max_tokens": max_tokens
+    }
     try:
-        timeout_value = 400 if fournisseur == "ollama" else 60
-        response = requests.post(model.api_endpoint, headers=headers, json=payload, timeout=timeout_value)
-        response.raise_for_status()
-        data = response.json()
-
-        if "url" in data:
-            return {"type": "image", "content": data["url"]}
-        if "data" in data and isinstance(data["data"], list) and "url" in data["data"][0]:
-            return {"type": "image", "content": data["data"][0]["url"]}
-
-        if fournisseur == "ollama":
-            return {"type": "text", "content": data.get("message", {}).get("content") or data.get("response")}
-        elif fournisseur in ["openrouter", "gpt", "groq", "deepseek"]:
-            return {"type": "text", "content": data["choices"][0]["message"]["content"]}
-        elif fournisseur == "gemini":
-            return {"type": "text", "content": data["candidates"][0]["content"]["parts"][0]["text"]}
-        else:
-            return {"type": "text", "content": data.get("text") or str(data)}
-
+        r = requests.post(url, headers=headers, json=payload, timeout=60)
+        r.raise_for_status()
+        data = r.json()
+        return {"type": "text", "content": data["choices"][0]["message"]["content"]}
     except Exception as e:
-        return {"type": "error", "content": f"Client error: {str(e)}"}
+        return {"type": "error", "content": f"Erreur Grok: {str(e)}"}
 
-# @bp_ai.route("/generer", methods=["POST"])
+
+# ---------- FONCTIONS DU CONTROLLER ----------
 def generer_contenu():
     data = request.get_json()
-    required_fields = ["id_utilisateur", "id_prompt", "id_model"]
-    missing_fields = [field for field in required_fields if field not in data]
-
-    if missing_fields:
-        return jsonify({"error": f"Champs manquant: {', '.join(missing_fields)}"}), 400
+    required = ["id_utilisateur", "id_prompt", "id_model"]
+    missing = [f for f in required if f not in data]
+    if missing:
+        return jsonify({"error": f"Champs manquants: {', '.join(missing)}"}), 400
 
     try:
-        id_utilisateur = data["id_utilisateur"]
-        id_prompt = data["id_prompt"]
-        id_model = data["id_model"]
-        id_template = data.get("id_template")
-
-        prompt = Prompt.query.get(id_prompt)
-        model = ModelIA.query.get(id_model)
-        template = Template.query.get(id_template) if id_template else None
+        prompt = Prompt.query.get(data["id_prompt"])
+        model = ModelIA.query.get(data["id_model"])
+        template = Template.query.get(data.get("id_template")) if data.get("id_template") else None
 
         if not prompt or not model:
-            return jsonify({"message": "Prompt ou modèle non trouvé"}), 404
+            return jsonify({"error": "Prompt ou modèle introuvable"}), 404
 
         prompt_text = prompt.texte_prompt
         if template:
-            prompt_text = template.structure.replace("{{prompt}}", prompt.texte_prompt)
+            prompt_text = template.structure.replace("{{prompt}}", prompt_text)
 
-        api_key = get_api_key(model.fournisseur)
-        if model.fournisseur.lower() not in ["ollama", "gpt4all"] and not api_key:
-            return jsonify({"error": f"Clé API non trouvée pour le fournisseur '{model.fournisseur}'"}), 400
+        temperature = (prompt.parametres or {}).get("temperature") or model.parametres_default.get("temperature", 0.7)
+        max_tokens = (prompt.parametres or {}).get("max_tokens") or model.parametres_default.get("max_tokens", 512)
 
-        type_contenu_detecte = detect_content_type(model, prompt_text)
-
-        resultat = call_model_api(model, prompt_text, {
-            "api_key": api_key,
-            "temperature": prompt.parametres.get("temperature", 0.7) if prompt.parametres else 0.7,
-            "max_tokens": prompt.parametres.get("max_tokens", 100) if prompt.parametres else 100
-        })
+        fournisseur = model.fournisseur.lower()
+        if fournisseur == "gpt4all":
+            resultat = call_gpt4all(prompt_text, temperature, max_tokens)
+        elif fournisseur == "gpt3":
+            api_key = os.getenv("API_KEY_OPENAI")
+            if not api_key:
+                return jsonify({"error": "Clé API OpenAI manquante"}), 400
+            resultat = call_gpt3(prompt_text, api_key, temperature, max_tokens)
+        elif fournisseur == "grok":
+            api_key = os.getenv("API_KEY_GROK")
+            if not api_key:
+                return jsonify({"error": "Clé API Grok manquante"}), 400
+            resultat = call_grok(prompt_text, api_key, temperature, max_tokens)
+        else:
+            return jsonify({"error": f"Fournisseur non supporté: {fournisseur}"}), 400
 
         if resultat["type"] == "error":
-            return jsonify({"error": resultat["content"]}), 400
+            return jsonify({"error": resultat["content"]}), 500
 
-        nouveau_contenu = Contenu(
-            id_utilisateur=id_utilisateur,
-            id_prompt=id_prompt,
-            id_model=id_model,
-            id_template=id_template,
+        contenu = Contenu(
+            id_utilisateur=data["id_utilisateur"],
+            id_prompt=data["id_prompt"],
+            id_model=data["id_model"],
+            id_template=data.get("id_template"),
             titre=data.get("titre", "Contenu généré"),
-            type_contenu=type_contenu_detecte,
-            texte=resultat["content"] if type_contenu_detecte == TypeContenuEnum.text else None,
-            image_url=resultat["content"] if type_contenu_detecte == TypeContenuEnum.image else None,
+            type_contenu=TypeContenuEnum.text,
+            texte=resultat["content"],
             meta={"source": model.nom_model, "date": str(datetime.utcnow())}
         )
-
-        db.session.add(nouveau_contenu)
+        db.session.add(contenu)
         db.session.commit()
 
         return jsonify({
-            "message": "Contenu généré avec succès",
+            "message": "✅ Contenu généré avec succès",
             "contenu": resultat["content"],
-            "type": type_contenu_detecte.value
+            "type": "text"
         }), 201
 
     except Exception as e:
+        db.session.rollback()
         return jsonify({"error": str(e)}), 500
+
+
+def get_all_contenus():
+    contenu = Contenu.query.all()
+    data = [{
+        "id": c.id,
+        "id_utilisateur": c.id_utilisateur,
+        "id_prompt": c.id_prompt,
+        "id_model": c.id_model,
+        "id_template": c.id_template,
+        "titre": c.titre,
+        "type_contenu": c.type_contenu.value,
+        "texte": c.texte,
+        "image_url": c.image_url,
+        "meta": c.meta,
+        "date_creation": c.date_creation.isoformat()
+    } for c in contenu]
+    return jsonify(data), 200
+
+
+def get_contenu_by_id(contenu_id):
+    contenu = Contenu.query.get(contenu_id)
+    if not contenu:
+        return jsonify({"error": "Contenu introuvable"}), 404
+    return jsonify({
+        "id": contenu.id,
+        "id_utilisateur": contenu.id_utilisateur,
+        "id_prompt": contenu.id_prompt,
+        "id_model": contenu.id_model,
+        "id_template": contenu.id_template,
+        "titre": contenu.titre,
+        "type_contenu": contenu.type_contenu.value,
+        "texte": contenu.texte,
+        "image_url": contenu.image_url,
+        "meta": contenu.meta,
+        "date_creation": contenu.date_creation.isoformat()
+    }), 200
+
+
+def update_contenu(contenu_id):
+    contenu = Contenu.query.get(contenu_id)
+    if not contenu:
+        return jsonify({"error": "Contenu introuvable"}), 404
+    data = request.get_json()
+    try:
+        contenu.titre = data.get("titre", contenu.titre)
+        contenu.texte = data.get("texte", contenu.texte)
+        contenu.image_url = data.get("image_url", contenu.image_url)
+        contenu.meta = data.get("meta", contenu.meta)
+        db.session.commit()
+        return jsonify({"message": "✅ Contenu mis à jour", "contenu_id": contenu.id}), 200
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({"error": f"Erreur DB: {str(e)}"}), 400
+
+
+def delete_contenu(contenu_id):
+    contenu = Contenu.query.get(contenu_id)
+    if not contenu:
+        return jsonify({"error": "Contenu introuvable"}), 404
+    try:
+        db.session.delete(contenu)
+        db.session.commit()
+        return jsonify({"message": "✅ Contenu supprimé"}), 200
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({"error": f"Erreur DB: {str(e)}"}), 400

@@ -8,6 +8,7 @@ from app.routes.template_routes import template_bp
 from app.routes.prompt_routes import prompt_bp
 from app.routes.generateur_routes import ollama_bp
 from app.routes.contenu_routes import contenu_bp
+from app.routes.oaut_routes import oauth_bp
 from dotenv import load_dotenv
 import os
 
@@ -22,7 +23,7 @@ def create_app():
       allow_headers=["Content-Type", "Authorization"],
       methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
-  # app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "default_secret_key")
+  app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "default_secret_key")
   app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DB_URL")
   app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
   
@@ -39,5 +40,7 @@ def create_app():
   app.register_blueprint(prompt_bp, url_prefix='/api/prompts')
   app.register_blueprint(ollama_bp, url_prefix='/api/generer')
   app.register_blueprint(contenu_bp, url_prefix="/api/contenu")
+  app.register_blueprint(oauth_bp, url_prefix="/api/oauth")
+
 
   return app

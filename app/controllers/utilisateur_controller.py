@@ -1,14 +1,24 @@
+
 from flask import request, jsonify
 from app.models.utilisateur import Utilisateur, TypeCompteEnum
 from app.extensions import db
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask_jwt_extended import get_jwt_identity
 
-
-def get_all_utilisateur():
+def get_all_utilisateurs():
+    """
+    Récupère tous les utilisateurs. Accessible uniquement aux administrateurs.
+    """
     try:
+        current_user_id = get_jwt_identity()
+        current_user = Utilisateur.query.get(current_user_id)
+
+        if current_user.type_compte != TypeCompteEnum.admin:
+            return jsonify({"error": "Unauthorized"}), 403
+        
         utilisateurs = Utilisateur.query.all()
         utilisateurs_data = [{
-            'id':utilisateur.id,
+            'id': utilisateur.id,
             'nom': utilisateur.nom,
             'prenom': utilisateur.prenom,
             'email': utilisateur.email,
@@ -22,9 +32,16 @@ def get_all_utilisateur():
     
 
 def get_utilisateur_by_id(utilisateur_id):
+    """
+    Récupère un utilisateur par son ID. Accessible à l'utilisateur lui-même ou aux administrateurs.
+    """
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+    if current_user_id != utilisateur_id and current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "Unauthorized"}), 403
+    
     utilisateur = Utilisateur.query.get_or_404(utilisateur_id)
-    if not utilisateur:
-        return jsonify({"error": "User not found"}), 404
     return jsonify({
         'id': utilisateur.id,
         'nom': utilisateur.nom,
@@ -35,49 +52,37 @@ def get_utilisateur_by_id(utilisateur_id):
         'actif': utilisateur.actif
     }), 200    
 
+def update_utilisateur(utilisateur_id):
+    """
+    Met à jour un utilisateur. Accessible à l'utilisateur lui-même ou aux administrateurs.
+    """
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
 
-def create_utilisateur():
+
+    if current_user_id != utilisateur_id and current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "Unauthorized"}), 403
+
     data = request.json
-    if not data or not all(key in data for key in ['nom', 'prenom', 'email', 'mot_de_passe']):
-        return {"error": "Missing required fields"}, 400
-    
-    try:
-        hashed_password = generate_password_hash(data['mot_de_passe'])
-        type_compte = data.get('type_compte', TypeCompteEnum.user)
-        if isinstance(type_compte, str):
-            try:
-                type_compte = TypeCompteEnum(type_compte)
-            except ValueError:
-                return jsonify({"error": "Invalid type_compte"}), 400
-        
-        new_utilisateur = Utilisateur(
-            nom=data['nom'],
-            prenom=data['prenom'],
-            email=data['email'],
-            mot_de_passe=hashed_password,
-            type_compte=type_compte,
-            actif=data.get('actif', True)
-        )
-        db.session.add(new_utilisateur)
-        db.session.commit()
-        return jsonify({
-            "message": "Utilisateur created successfully",
-            "utilisateur_id": new_utilisateur.id,
-        }), 201
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 400
-    
-def update_utilisateur(utilisateur_id, data):
     utilisateur = Utilisateur.query.get(utilisateur_id)
     if not utilisateur:
         return jsonify({"error": "Utilisateur not found"}), 404
     
     if 'mot_de_passe' in data:
         data['mot_de_passe'] = generate_password_hash(data['mot_de_passe'])
+
+    
+    if 'type_compte' in data and current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "Unauthorized to change account type"}), 403
     
     for key, value in data.items():
         if hasattr(utilisateur, key):
+       
+            if key == 'type_compte' and isinstance(value, str):
+                try:
+                    value = TypeCompteEnum(value)
+                except ValueError:
+                    return jsonify({"error": "Invalid type_compte value"}), 400
             setattr(utilisateur, key, value)
     
     try:
@@ -88,6 +93,13 @@ def update_utilisateur(utilisateur_id, data):
         return jsonify({"error": str(e)}), 400
 
 def delete_utilisateur(utilisateur_id):
+   
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+    if current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "Unauthorized"}), 403
+
     utilisateur = Utilisateur.query.get(utilisateur_id)
     if not utilisateur:
         return jsonify({"error": "Utilisateur not found"}), 404

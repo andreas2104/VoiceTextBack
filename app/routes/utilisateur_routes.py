@@ -9,7 +9,7 @@ def get_all_utilisateur():
 
 @utilisateur_bp.route("/", methods=["POST"])
 def create_utilisateur():
-    return utilisateur_controller.create_utilisateur()  # << pas d'arg
+    return utilisateur_controller.create_utilisateur()  
 
 @utilisateur_bp.route("/<int:utilisateur_id>", methods=["GET"])
 def get_utilisateur_by_id(utilisateur_id):

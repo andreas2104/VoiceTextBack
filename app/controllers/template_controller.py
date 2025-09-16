@@ -1,11 +1,26 @@
 from flask import request, jsonify
 from app.models.template import Template
+from app.models.utilisateur import Utilisateur, TypeCompteEnum
 from app.extensions import db
-
+from flask_jwt_extended import get_jwt_identity
+from sqlalchemy.exc import SQLAlchemyError
 
 def get_all_template():
     try:
-        templates = Template.query.all()
+        current_user_id = get_jwt_identity()
+        current_user = Utilisateur.query.get(current_user_id)
+
+        if not current_user:
+            return jsonify({"error": "Utilisateur non trouver"}), 404
+        
+        if current_user.type_compte == TypeCompteEnum.admin:
+            
+            templates = Template.query.all()
+        else:
+            templates = Template.query.filter(
+                (Template.public == True)| (Template.id_utilisateur == current_user_id)
+            ).all()
+
         templates_data = [t.to_dict() for t in templates]
         return jsonify(templates_data), 200
     except Exception as e:
@@ -13,11 +28,23 @@ def get_all_template():
 
 
 def get_template_by_id(template_id):
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+
     t = Template.query.get_or_404(template_id)
+    if (not t.public) and (t.id_utilisateur != current_user_id) and (current_user.type_compte != TypeCompteEnum.admin):
+        return jsonify({"error": "unautorized"}), 403    
     return jsonify(t.to_dict()), 200
 
 
 def create_template():
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({"error": "Utilisateur non trouver"}), 404
+    
     data = request.json
     required_fields = ['nom_template', 'structure', 'variables', 'type_sortie', 'public']
     if not data or not all(key in data for key in required_fields):
@@ -29,7 +56,8 @@ def create_template():
             structure=data['structure'],
             variables=data.get('variables'),
             type_sortie=data['type_sortie'],
-            public=data['public']
+            public=data['public', False],
+            id_utilisateur=current_user_id
             # date_creation est auto-géré
         )
         db.session.add(new_template)
@@ -44,8 +72,14 @@ def create_template():
 
 
 def update_template(template_id):
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
     data = request.json
     template = Template.query.get_or_404(template_id)
+
+    if  template.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum:
+        return jsonify({"error": "unauthorized"}), 403
     try:
         if 'nom_template' in data:
             template.nom_template = data['nom_template']
@@ -66,10 +100,16 @@ def update_template(template_id):
 
 
 def delete_template(template_id):
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
     template = Template.query.get(template_id)
     if not template:
         return jsonify({"error": "Template not found"}), 404
 
+    if template.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum:
+        return jsonify({ "error": "unauthorized"}), 403
+    
     try:
         db.session.delete(template)
         db.session.commit()

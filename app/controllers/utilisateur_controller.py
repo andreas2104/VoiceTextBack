@@ -1,4 +1,3 @@
-
 from flask import request, jsonify
 from app.models.utilisateur import Utilisateur, TypeCompteEnum
 from app.extensions import db
@@ -71,7 +70,9 @@ def update_utilisateur(utilisateur_id):
     if 'mot_de_passe' in data:
         data['mot_de_passe'] = generate_password_hash(data['mot_de_passe'])
 
-    
+    if 'photo' in data:
+       utilisateur.photo = data['photo']
+
     if 'type_compte' in data and current_user.type_compte != TypeCompteEnum.admin:
         return jsonify({"error": "Unauthorized to change account type"}), 403
     

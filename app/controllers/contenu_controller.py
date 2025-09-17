@@ -6,11 +6,13 @@ from app.models.contenu import Contenu, TypeContenuEnum
 from app.models.prompt import Prompt
 from app.models.modelIA import ModelIA
 from app.models.template import Template
+from app.models.utilisateur import Utilisateur, TypeCompteEnum
+from flask_jwt_extended import get_jwt_identity
 from datetime import datetime
 from gpt4all import GPT4All
 from sqlalchemy.exc import SQLAlchemyError
 
-# Singleton GPT4All
+
 _gpt4all_instance = None
 def get_gpt4all_instance():
     global _gpt4all_instance
@@ -20,11 +22,10 @@ def get_gpt4all_instance():
             "orca-mini-3b-gguf2-q4_0.gguf",
             model_path=os.path.dirname(model_path)
         )
-        print(f"✅ Modèle GPT4All chargé : {model_path}")
+        print(f"Modèle GPT4All chargé : {model_path}")
     return _gpt4all_instance
 
 
-# ---------- APPELS AUX MODELS ----------
 def call_gpt4all(prompt_text, temperature=0.7, max_tokens=512):
     try:
         llm = get_gpt4all_instance()
@@ -69,8 +70,13 @@ def call_grok(prompt_text, api_key, temperature=0.7, max_tokens=512):
         return {"type": "error", "content": f"Erreur Grok: {str(e)}"}
 
 
-# ---------- FONCTIONS DU CONTROLLER ----------
 def generer_contenu():
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({"error":"Utiliserateur non trouver"}), 404
+
     data = request.get_json()
     required = ["id_utilisateur", "id_prompt", "id_model"]
     missing = [f for f in required if f not in data]
@@ -84,6 +90,10 @@ def generer_contenu():
 
         if not prompt or not model:
             return jsonify({"error": "Prompt ou modèle introuvable"}), 404
+        if current_user.type_compte != TypeContenuEnum.admin:
+            data["id_utilisateur"] = current_user_id
+        else:
+            data["id_utilisateur"] = data.get("id_utilisateur", current_user_id)
 
         prompt_text = prompt.texte_prompt
         if template:
@@ -136,7 +146,17 @@ def generer_contenu():
 
 
 def get_all_contenus():
-    contenu = Contenu.query.all()
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({"error": "Utilisateur non trouver"}), 404
+    if current_user.type_compte == TypeCompteEnum.admin:
+
+        contenu = Contenu.query.all()
+    else:
+        contenu = Contenu.query.filter_by(id_utilisateur=current_user_id).all()
+
     data = [{
         "id": c.id,
         "id_utilisateur": c.id_utilisateur,
@@ -154,9 +174,14 @@ def get_all_contenus():
 
 
 def get_contenu_by_id(contenu_id):
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
     contenu = Contenu.query.get(contenu_id)
     if not contenu:
         return jsonify({"error": "Contenu introuvable"}), 404
+    if contenu.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "Unothorized"}), 403
+
     return jsonify({
         "id": contenu.id,
         "id_utilisateur": contenu.id_utilisateur,
@@ -173,9 +198,15 @@ def get_contenu_by_id(contenu_id):
 
 
 def update_contenu(contenu_id):
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query(current_user_id)
+
     contenu = Contenu.query.get(contenu_id)
     if not contenu:
         return jsonify({"error": "Contenu introuvable"}), 404
+    if contenu.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum:
+        return jsonify({"error": "unauthorized"}), 403
+
     data = request.get_json()
     try:
         contenu.titre = data.get("titre", contenu.titre)
@@ -190,9 +221,16 @@ def update_contenu(contenu_id):
 
 
 def delete_contenu(contenu_id):
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
     contenu = Contenu.query.get(contenu_id)
     if not contenu:
         return jsonify({"error": "Contenu introuvable"}), 404
+    
+    if contenu.id_utilisateur != current_user_id and current_user.Type_compte != TypeCompteEnum:
+        return jsonify({"error": "unauthorized"}), 403
+    
     try:
         db.session.delete(contenu)
         db.session.commit()

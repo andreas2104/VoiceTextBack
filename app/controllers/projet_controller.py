@@ -1,13 +1,27 @@
 from flask import request, jsonify
 from app.models.projet import Projet,TypeStatusEnum
+from app.models.utilisateur import Utilisateur, TypeCompteEnum
 from app.extensions import db
 from datetime import datetime
 from sqlalchemy.exc import SQLAlchemyError
+from flask_jwt_extended import get_jwt_identity
 import json
 
 def get_all_projet():
     try:
-        projets = Projet.query.all()
+        current_user_id = get_jwt_identity()
+        current_user = Utilisateur.query.get(current_user_id)
+
+        if not current_user:
+            return jsonify({"error": "Utilisateur not authaurized"}), 404
+        if current_user.type_compte == TypeCompteEnum.admin:
+
+            projets = Projet.query.all()
+        else:
+            projets = Projet.query.filter(
+                (Projet.id_utilisateur == current_user_id)
+            ).all()
+
         projets_data = [{
             'id': projet.id,
             'id_utilisateur': projet.id_utilisateur,
@@ -22,10 +36,17 @@ def get_all_projet():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 def get_projet_by_id(projet_id):
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
     projet = Projet.query.get(projet_id)
     if not projet:
         return jsonify({"error":"projet not found"}),404
+    
+    if (not projet.id_utilisateur != current_user_id) and (current_user.type_compte != TypeCompteEnum.admin):
+        return jsonify({"error": "unauthorized"}), 403
     
     return jsonify({
         'id': projet.id,
@@ -39,6 +60,12 @@ def get_projet_by_id(projet_id):
     }), 200
 
 def create_projet():
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({"error":"unauthorized"}), 404
+    
     data = request.get_json()
     required_fields = ['id_utilisateur', 'nom_projet', 'description']
     if not data or not all(field in data for field in required_fields):
@@ -79,9 +106,14 @@ def create_projet():
     
 
 def update_projet(projet_id):
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
     projet = Projet.query.get(projet_id)
     if not projet:
         return jsonify({"error": "projet not found"}), 404
+    if projet.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "unauthorized"}), 403
     
     data = request.get_json()
     try:
@@ -104,14 +136,16 @@ def update_projet(projet_id):
     
 
 def delete_projet(projet_id):
-        projet = Projet.query.get_or_404(projet_id)   
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)   
+    projet = Projet.query.get_or_404(projet_id)   
 
-        try:
-            db.session.delete(projet)
-            db.session.commit()
-            return jsonify({"message": "projet deleted successfully"}), 200                                     
-        except Exception as e:  
-            db.session.rollback()
-            return jsonify({"error": str(e)}), 400
-
-
+    if projet.id_utilisateur != current_user and current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "Unhautorized"}),403
+    try:
+        db.session.delete(projet)
+        db.session.commit()
+        return jsonify({"message": "projet deleted successfully"}), 200                                     
+    except Exception as e:  
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400

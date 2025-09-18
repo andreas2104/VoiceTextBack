@@ -1,8 +1,11 @@
 from flask import request, jsonify
 from app.models.modelIA import ModelIA, TypeModelEnum
+from app.models.utilisateur import Utilisateur, TypeCompteEnum
 from app.extensions import db
 from sqlalchemy.exc import SQLAlchemyError
 import json
+from flask_jwt_extended import get_jwt_identity
+
 
 def get_all_modelIA():
   try: 
@@ -44,7 +47,6 @@ def create_modelIA():
     
     if not data or not all(field in data for field in required_fields):
         return jsonify({"error": "Missing required fields"}), 400
-
     try:
      
         try:

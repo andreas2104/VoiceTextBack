@@ -1,5 +1,6 @@
 from flask import Flask
 from flask_cors import CORS
+from flask_jwt_extended import JWTManager
 from .extensions import db, migrate
 from app.routes.utilisateur_routes import utilisateur_bp
 from app.routes.projet_routes import projet_bp
@@ -9,6 +10,7 @@ from app.routes.prompt_routes import prompt_bp
 from app.routes.generateur_routes import ollama_bp
 from app.routes.contenu_routes import contenu_bp
 from app.routes.oaut_routes import oauth_bp
+from app.routes.auth_routes import auth_bp
 from dotenv import load_dotenv
 import os
 
@@ -24,9 +26,11 @@ def create_app():
       methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
   app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "default_secret_key")
+  app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "your-jwt-secret-key") 
   app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DB_URL")
   app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
   
+  jwt = JWTManager(app)
 
   db.init_app(app)
   migrate.init_app(app, db)
@@ -41,6 +45,7 @@ def create_app():
   app.register_blueprint(ollama_bp, url_prefix='/api/generer')
   app.register_blueprint(contenu_bp, url_prefix="/api/contenu")
   app.register_blueprint(oauth_bp, url_prefix="/api/oauth")
+  app.register_blueprint(auth_bp, url_prefix="/api/auth")
 
 
   return app

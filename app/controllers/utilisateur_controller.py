@@ -5,9 +5,6 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import get_jwt_identity
 
 def get_all_utilisateurs():
-    """
-    Récupère tous les utilisateurs. Accessible uniquement aux administrateurs.
-    """
     try:
         current_user_id = get_jwt_identity()
         current_user = Utilisateur.query.get(current_user_id)
@@ -31,9 +28,6 @@ def get_all_utilisateurs():
     
 
 def get_utilisateur_by_id(utilisateur_id):
-    """
-    Récupère un utilisateur par son ID. Accessible à l'utilisateur lui-même ou aux administrateurs.
-    """
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
@@ -51,13 +45,10 @@ def get_utilisateur_by_id(utilisateur_id):
         'actif': utilisateur.actif
     }), 200    
 
+
 def update_utilisateur(utilisateur_id):
-    """
-    Met à jour un utilisateur. Accessible à l'utilisateur lui-même ou aux administrateurs.
-    """
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
-
 
     if current_user_id != utilisateur_id and current_user.type_compte != TypeCompteEnum.admin:
         return jsonify({"error": "Unauthorized"}), 403
@@ -77,15 +68,13 @@ def update_utilisateur(utilisateur_id):
         return jsonify({"error": "Unauthorized to change account type"}), 403
     
     for key, value in data.items():
-        if hasattr(utilisateur, key):
-       
+        if hasattr(utilisateur, key):      
             if key == 'type_compte' and isinstance(value, str):
                 try:
                     value = TypeCompteEnum(value)
                 except ValueError:
                     return jsonify({"error": "Invalid type_compte value"}), 400
-            setattr(utilisateur, key, value)
-    
+            setattr(utilisateur, key, value)   
     try:
         db.session.commit()
         return jsonify({"message": "Utilisateur updated successfully"}), 200
@@ -93,8 +82,8 @@ def update_utilisateur(utilisateur_id):
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
 
-def delete_utilisateur(utilisateur_id):
-   
+
+def delete_utilisateur(utilisateur_id):  
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
@@ -103,8 +92,7 @@ def delete_utilisateur(utilisateur_id):
 
     utilisateur = Utilisateur.query.get(utilisateur_id)
     if not utilisateur:
-        return jsonify({"error": "Utilisateur not found"}), 404
-    
+        return jsonify({"error": "Utilisateur not found"}), 404    
     try:
         db.session.delete(utilisateur)
         db.session.commit()
@@ -112,3 +100,10 @@ def delete_utilisateur(utilisateur_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
+
+def current_utilisateur():
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+    if not current_user:
+        return jsonify({"error": "utilisateur non trouver"}),404
+    return jsonify(current_user.to_dict()), 200

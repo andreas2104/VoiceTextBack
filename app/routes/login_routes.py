@@ -7,7 +7,7 @@ from  models import Utilisateur, TypeCompteEnum
 
 main = Blueprint('main', __name__)
 
-@main.route('/login', methods=['POST'])
+@main.route('/utilisateurs/login', methods=['POST'])
 def login():
     """
     Vérifie les informations de connexion et génère un JWT.

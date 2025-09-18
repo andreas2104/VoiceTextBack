@@ -122,7 +122,7 @@ def generer_contenu():
             return jsonify({"error": resultat["content"]}), 500
 
         contenu = Contenu(
-            id_utilisateur=data["id_utilisateur"],
+            id_utilisateur=current_user.id,
             id_prompt=data["id_prompt"],
             id_model=data["id_model"],
             id_template=data.get("id_template"),
@@ -180,7 +180,7 @@ def get_contenu_by_id(contenu_id):
     if not contenu:
         return jsonify({"error": "Contenu introuvable"}), 404
     if contenu.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
-        return jsonify({"error": "Unothorized"}), 403
+        return jsonify({"error": "Non authorise"}), 403
 
     return jsonify({
         "id": contenu.id,
@@ -200,12 +200,14 @@ def get_contenu_by_id(contenu_id):
 def update_contenu(contenu_id):
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query(current_user_id)
+    if not current_user:
+        return jsonify({"error": "Utilisateur non trouvé"}), 404
 
     contenu = Contenu.query.get(contenu_id)
     if not contenu:
         return jsonify({"error": "Contenu introuvable"}), 404
-    if contenu.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum:
-        return jsonify({"error": "unauthorized"}), 403
+    if contenu.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "Non authorise"}), 403
 
     data = request.get_json()
     try:
@@ -224,11 +226,13 @@ def delete_contenu(contenu_id):
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
+    if not current_user:
+        return jsonify({"error": "Utilisateur non trouve"}), 404
+
     contenu = Contenu.query.get(contenu_id)
     if not contenu:
-        return jsonify({"error": "Contenu introuvable"}), 404
-    
-    if contenu.id_utilisateur != current_user_id and current_user.Type_compte != TypeCompteEnum:
+        return jsonify({"error": "Contenu introuvable"}), 404 
+    if contenu.id_utilisateur != current_user_id and current_user.Type_compte != TypeCompteEnum.admin:
         return jsonify({"error": "unauthorized"}), 403
     
     try:

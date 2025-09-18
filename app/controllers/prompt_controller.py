@@ -1,13 +1,33 @@
 from flask import request, jsonify
 from app.models.prompt import Prompt
+from app.models.utilisateur import Utilisateur, TypeCompteEnum
 from app.extensions import db
 from datetime import datetime
 import json
+from flask_jwt_extended import get_jwt_identity
+from sqlalchemy.exc import SQLAlchemyError
+
+
+def get_user():
+   current_user_id = get_jwt_identity()
+   current_user = Utilisateur.query.get(current_user_id)
+   if not current_user:
+      return None, jsonify({"error": "Utilisateur non trouver"}), 404
+   return current_user, None, None
 
 
 def get_all_prompt():
   try: 
-    prompts = Prompt.query.all()
+    current_user, error_response, status_code = get_user()
+    if error_response:
+       return error_response, status_code
+    if current_user.type_compte == TypeCompteEnum.admin:
+       
+      prompts = Prompt.query.all()
+    else:
+      prompts = Prompt.query.filter(
+         (Prompt.public == True) | (Prompt.id_utilisateur == current_user.id)
+      ).all()
     p_data = [{
       'id':p.id,
       'id_utilisateur': p.id_utilisateur,
@@ -25,8 +45,15 @@ def get_all_prompt():
   
 
 def get_prompt_by_id(prompt_id):
-    p = Prompt.query.get_or_404(prompt_id)
-    return jsonify({
+      current_user, error_response, status_code = get_user()
+      if error_response:
+         return error_response, status_code
+      
+      p = Prompt.query.get_or_404(prompt_id)
+      if not p.public and p.id_utilisateur != current_user.id and current_user.type_compte != TypeCompteEnum.admin:
+         return jsonify({"error": "non authorise"}), 403
+      
+      return jsonify({
       'id': p.id,
       'id_utilisateur': p.id_utilisateur,
       'nom_prompt': p.nom_prompt,
@@ -40,6 +67,9 @@ def get_prompt_by_id(prompt_id):
 
 
 def create_prompt():
+   current_user, error_response, status_code = get_user()
+   if error_response:
+      return error_response, status_code
    data = request.get_json()
    required_fields = ['id_utilisateur','nom_prompt','parametres','public','utilisation_count']
    if not data or not all(field in data for field in required_fields ):
@@ -53,7 +83,7 @@ def create_prompt():
          except json.JSONDecodeError:
             return jsonify({"error": "Invalid JSON format for paramatres"}), 400
       new_prompt = Prompt(
-         id_utilisateur=data["id_utilisateur"],
+         id_utilisateur=current_user.id,
          nom_prompt=data["nom_prompt"],
          texte_prompt=data["texte_prompt"],
          parametres=data["parametres"],
@@ -74,13 +104,15 @@ def create_prompt():
    
 
 def update_prompt(prompt_id):
-    p = Prompt.query.get(prompt_id)
-    if not p:
-       return jsonify({"error": "prompt not found"}), 400
-
-    data = request.get_json()
-    try:
-       p.nom_utilisateur =  data.get('nom_utilisateur', p.nom_utilisateur)
+   current_user, error_response, status_code = get_user()
+   if error_response:
+        return error_response, status_code
+   
+   p = Prompt.query.get_or_404(prompt_id)
+   if p.id_utilisateur != current_user.id and current_user.type_compte != TypeCompteEnum.admin:
+      return jsonify({"error": "non authorise"}), 403
+   data = request.get_json()
+   try:
        p.nom_prompt = data.get('nom_prompt', p.nom_prompt)
        p.text_prompt = data.get('text_prompt', p.text_prompt)
        p.parametres = data.get('parametres', p.parametres)
@@ -93,14 +125,20 @@ def update_prompt(prompt_id):
          "message": "prompt update successfully",
          "prompt_id": p.id
          }), 200
-    except Exception as e:
+   except Exception as e:
        db.session.rollback()
        return jsonify({" error": str(e)}),400
     
 
 def delete_prompt(prompt_id):
+   current_user, error_response, status_code = get_user()
+   if error_response:
+        return error_response, status_code
+   
    p = Prompt.query.get_or_404(prompt_id)
 
+   if p.id_utilisateur != current_user.id and current_user.type_compte != TypeCompteEnum.admin:
+      return jsonify({"error": "non authorise"}), 403
    try:
       db.session.delete(p)
       db.session.commit()

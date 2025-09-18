@@ -5,7 +5,7 @@ utilisateur_bp = Blueprint('utilisateur_bp', __name__)
 
 @utilisateur_bp.route("/", methods=["GET"])
 def get_all_utilisateur():
-    return utilisateur_controller.get_all_utilisateur()
+    return utilisateur_controller.get_all_utilisateurs()
 
 @utilisateur_bp.route("/", methods=["POST"])
 def create_utilisateur():
@@ -24,6 +24,10 @@ def delete_utilisateur(utilisateur_id):
     return utilisateur_controller.delete_utilisateur(utilisateur_id)
 
 from app.utils.roles import roles_required
+
+@utilisateur_bp.route("/me", methods=["GET"])
+def current_utilisateur():
+    return utilisateur_controller.current_utilisateur()
 
 @utilisateur_bp.route("/admin-only", methods=["GET"])
 @roles_required("admin")

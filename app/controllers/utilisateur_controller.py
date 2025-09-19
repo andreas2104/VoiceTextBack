@@ -102,8 +102,27 @@ def delete_utilisateur(utilisateur_id):
         return jsonify({"error": str(e)}), 400
 
 def current_utilisateur():
-    current_user_id = get_jwt_identity()
-    current_user = Utilisateur.query.get(current_user_id)
-    if not current_user:
-        return jsonify({"error": "utilisateur non trouver"}),404
-    return jsonify(current_user.to_dict()), 200
+    try:
+        current_user_id = get_jwt_identity()
+        if not current_user_id:
+            return jsonify({"error": "Token invalide"}), 401
+
+        utilisateur = Utilisateur.query.get(current_user_id)
+        if not utilisateur:
+            return jsonify({"error": "Utilisateur non trouvé"}), 404
+
+        utilisateur_data = {
+            "id": utilisateur.id,
+            "nom": utilisateur.nom,
+            "prenom": utilisateur.prenom,
+            "email": utilisateur.email,
+            "type_compte": utilisateur.type_compte.value if utilisateur.type_compte else None,
+            "date_creation": utilisateur.date_creation.isoformat() if utilisateur.date_creation else None,
+            "actif": utilisateur.actif,
+            "photo": utilisateur.photo
+        }
+
+        return jsonify(utilisateur_data), 200
+    except Exception as e:
+        print("Erreur dans get_current_utilisateur:", e)
+        return jsonify({"error": str(e)}), 500

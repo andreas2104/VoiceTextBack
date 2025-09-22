@@ -104,31 +104,33 @@ def create_prompt():
    
 
 def update_prompt(prompt_id):
-   current_user, error_response, status_code = get_user()
-   if error_response:
+    current_user, error_response, status_code = get_user()
+    if error_response:
         return error_response, status_code
-   
-   p = Prompt.query.get_or_404(prompt_id)
-   if p.id_utilisateur != current_user.id and current_user.type_compte != TypeCompteEnum.admin:
-      return jsonify({"error": "non authorise"}), 403
-   data = request.get_json()
-   try:
-       p.nom_prompt = data.get('nom_prompt', p.nom_prompt)
-       p.text_prompt = data.get('text_prompt', p.text_prompt)
-       p.parametres = data.get('parametres', p.parametres)
-       p.public = data.get('public', p.public),
-       p.utilisation_count= data.get("utilisatin_count", p.utilisation_count)
-       p.date_modification = datetime.utcnow()
 
-       db.session.commit()
-       return jsonify({
-         "message": "prompt update successfully",
-         "prompt_id": p.id
-         }), 200
-   except Exception as e:
-       db.session.rollback()
-       return jsonify({" error": str(e)}),400
-    
+    p = Prompt.query.get_or_404(prompt_id)
+
+    if p.id_utilisateur != current_user.id and current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "non authorise"}), 403
+
+    data = request.get_json()
+    try:
+        p.nom_prompt = data.get('nom_prompt', p.nom_prompt)
+        p.texte_prompt = data.get('texte_prompt', p.texte_prompt)  
+        p.parametres = data.get('parametres', p.parametres)
+        p.public = data.get('public', p.public)                    
+        p.utilisation_count = data.get("utilisation_count", p.utilisation_count) 
+        p.date_modification = datetime.utcnow()
+
+        db.session.commit()
+        return jsonify({
+            "message": "prompt update successfully",
+            "prompt_id": p.id
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400
+
 
 def delete_prompt(prompt_id):
    current_user, error_response, status_code = get_user()

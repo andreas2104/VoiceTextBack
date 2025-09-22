@@ -1,5 +1,3 @@
-# app/routes.py
-
 from flask import Blueprint, jsonify
 from app.controllers import auth_controller
 from flask_jwt_extended import jwt_required, get_jwt_identity

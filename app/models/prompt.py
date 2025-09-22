@@ -18,3 +18,15 @@ class Prompt(db.Model):
   def __repr__(self):
     return f"<Prompt {self.id}: {self.nom_prompt}>"
   # migration a refaire
+  def to_dict(self):
+    return {
+        'id': self.id,
+        'id_utilisateur': self.id_utilisateur,
+        'nom_prompt': self.nom_prompt,
+        'texte_prompt': self.texte_prompt,
+        'parametres': self.parametres,
+        'public': self.public,
+        'utilisation_count': self.utilisation_count,
+        'date_creation': self.date_creation.isoformat() if self.date_creation else None,
+        'date_modification': self.date_modification.isoformat() if self.date_modification else None,
+    }

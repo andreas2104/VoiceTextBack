@@ -3,15 +3,15 @@ from app.controllers import modelIA_controller
 from app.extensions import db
 from flask import request
 
-modelIA_bp = Blueprint('modelIA_bp', __name__)
+modelIA_bp = Blueprint('modelIA_bp', __name__, url_prefix="/")
 
 
 
-@modelIA_bp.route("/", methods=["GET"])
+@modelIA_bp.route("/", methods=["GET"],strict_slashes=False)
 def get_all_modelIA():
     return modelIA_controller.get_all_modelIA()
 
-@modelIA_bp.route("/", methods=["POST"])
+@modelIA_bp.route("/", methods=["POST"], strict_slashes=False)
 def create_modelIA():
     return modelIA_controller.create_modelIA()
 

@@ -14,38 +14,61 @@ from app.routes.auth_routes import auth_bp
 from dotenv import load_dotenv
 import os
 
-
 def create_app():
-  load_dotenv()
+    load_dotenv()
 
-  app = Flask(__name__)
-  CORS(app,
-      resources={r"/api/*": {"origins": "http://localhost:3000"}},
-      supports_credentials=True,
-      allow_headers=["Content-Type", "Authorization"],
-      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+    app = Flask(__name__)
 
-  app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "default_secret_key")
-  app.config['JWT_SECRET_KEY'] = os.getenv("JWT_SECRET_KEY", "your-jwt-secret-key") 
-  app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DB_URL")
-  app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-  
-  jwt = JWTManager(app)
+    app.url_map.strict_slashes = False
+    
+    app.config.update({
+        'SECRET_KEY': os.getenv("SECRET_KEY", "default_secret_key"),
+        'JWT_SECRET_KEY': os.getenv("JWT_SECRET_KEY", "your-jwt-secret-key"),
+        'SQLALCHEMY_DATABASE_URI': os.getenv("DB_URL"),
+        'SQLALCHEMY_TRACK_MODIFICATIONS': False,
+        'SQLALCHEMY_ENGINE_OPTIONS': {
+            'pool_size': 10,
+            'pool_recycle': 300,
+            'pool_pre_ping': True,
+            'max_overflow': 20
+        },
+        'JWT_ACCESS_TOKEN_EXPIRES': 3600,  
+        'JWT_ALGORITHM': 'HS256'
+    })
+    
+    CORS(app,
+         resources={r"/api/*": {"origins": ["http://localhost:3000"]}},
+         supports_credentials=True,
+         allow_headers=["Content-Type", "Authorization"],
+         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+         max_age=3600)  # Cache preflight requests
 
-  db.init_app(app)
-  migrate.init_app(app, db)
-  with app.app_context():
-    db.create_all()
-  
-  app.register_blueprint(utilisateur_bp, url_prefix='/api/utilisateurs')
-  app.register_blueprint(projet_bp, url_prefix='/api/projets')
-  app.register_blueprint(modelIA_bp, url_prefix='/api/modelIA')
-  app.register_blueprint(template_bp, url_prefix='/api/templates')
-  app.register_blueprint(prompt_bp, url_prefix='/api/prompts')
-  app.register_blueprint(ollama_bp, url_prefix='/api/generer')
-  app.register_blueprint(contenu_bp, url_prefix="/api/contenu")
-  app.register_blueprint(oauth_bp, url_prefix="/api/oauth")
-  app.register_blueprint(auth_bp, url_prefix="/api/auth")
+    jwt = JWTManager(app)
+    
+    @jwt.token_in_blocklist_loader
+    def check_if_token_revoked(jwt_header, jwt_payload):
+        return False
+    
+    db.init_app(app)
+    migrate.init_app(app, db)
+    
+    if app.config.get('ENV') != 'production':
+        with app.app_context():
+            db.create_all()
+    
+    blueprints = [
+        (utilisateur_bp, '/api/utilisateurs'),
+        (projet_bp, '/api/projets'),
+        (modelIA_bp, '/api/modelIA'),
+        (template_bp, '/api/templates'),
+        (prompt_bp, '/api/prompts'),
+        (ollama_bp, '/api/generer'),
+        (contenu_bp, "/api/contenu"),
+        (oauth_bp, "/api/oauth"),
+        (auth_bp, "/api/auth")
+    ]
+    
+    for blueprint, prefix in blueprints:
+        app.register_blueprint(blueprint, url_prefix=prefix)
 
-
-  return app
+    return app

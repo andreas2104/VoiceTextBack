@@ -25,3 +25,18 @@ class Contenu(db.Model):
 
     def __repr__(self):
         return f"<Contenu {self.id}: {self.titre}>"
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "id_utilisateur": self.id_utilisateur,
+            "id_model": self.id_model,
+            "id_template": self.id_template,
+            "id_prompt": self.id_prompt,
+            "titre": self.titre,
+            "type_contenu": self.type_contenu.value if self.type_contenu else None,
+            "texte": self.texte,
+            "image_url": self.image_url,
+            "meta": self.meta,
+            "date_creation": self.date_creation.isoformat() if self.date_creation else None,
+        }

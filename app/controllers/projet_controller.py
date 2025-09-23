@@ -123,6 +123,7 @@ def update_projet(projet_id):
         projet.status = TypeStatusEnum(data.get('status', projet.status))
         projet.configuration = data.get('configuration', projet.configuration)
         projet.id_utilisateur = data.get('id_utilisateur', projet.id_utilisateur)
+        
 
         db.session.commit()
         return jsonify({
@@ -138,14 +139,19 @@ def update_projet(projet_id):
 def delete_projet(projet_id):
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)   
+    
+    if not current_user:
+        return jsonify({"error": "Utilisateur non autorisé"}), 401
+    
     projet = Projet.query.get_or_404(projet_id)   
 
-    if projet.id_utilisateur != current_user and current_user.type_compte != TypeCompteEnum.admin:
-        return jsonify({"error": "Unhautorized"}),403
+    if projet.id_utilisateur != current_user.id and current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "Unauthorized"}), 403
+    
     try:
         db.session.delete(projet)
         db.session.commit()
-        return jsonify({"message": "projet deleted successfully"}), 200                                     
+        return jsonify({"message": "Projet supprimé avec succès"}), 200                                     
     except Exception as e:  
         db.session.rollback()
         return jsonify({"error": str(e)}), 400

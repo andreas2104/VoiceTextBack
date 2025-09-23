@@ -20,16 +20,16 @@ class Plateforme(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     id_utilisateur = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable=False)
     nom_plateforme = db.Column(db.Enum(TypePlateformeEnum), nullable=False)
-    nom_compte = db.Column(db.String(100))  # Nom du compte/page
-    id_compte_externe = db.Column(db.String(100))  # ID Facebook Page ou LinkedIn Company
+    nom_compte = db.Column(db.String(100))  
+    id_compte_externe = db.Column(db.String(100))  
     
     access_token = db.Column(db.Text)
     refresh_token = db.Column(db.Text)
     token_expiration = db.Column(db.DateTime)
     statut_connexion = db.Column(db.Enum(StatutConnexionEnum), default=StatutConnexionEnum.deconnecte)
     
-    permissions_accordees = db.Column(db.JSON, default=list)  # ["pages_manage_posts", "publish_to_groups"]
-    parametres_publication = db.Column(db.JSON, default=dict)  # Paramètres par défaut
+    permissions_accordees = db.Column(db.JSON, default=list)  
+    parametres_publication = db.Column(db.JSON, default=dict) 
     
     limite_posts_jour = db.Column(db.Integer, default=25)  # Limite API
     posts_publies_aujourd_hui = db.Column(db.Integer, default=0)

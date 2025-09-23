@@ -2,7 +2,7 @@ from flask import Blueprint
 from flask_jwt_extended import jwt_required
 from app.controllers import contenu_controller
 
-contenu_bp = Blueprint("contenu_bp", __name__, url_prefix="/contenus")
+contenu_bp = Blueprint("contenu_bp", __name__, url_prefix="/contenu")
 
 
 @contenu_bp.route("/", methods=["GET"], strict_slashes=False)

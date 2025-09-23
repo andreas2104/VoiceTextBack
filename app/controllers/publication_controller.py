@@ -1,0 +1,165 @@
+from flask import request, jsonify
+from app.extensions import db
+from app.models.publication import Publication, StatutPublicationEnum
+from app.models.utilisateur import Utilisateur, TypeCompteEnum
+from app.models.contenu import Contenu
+from app.models.plateforme import Plateforme
+from flask_jwt_extended import get_jwt_identity
+from sqlalchemy.exc import SQLAlchemyError
+from datetime import datetime
+
+def get_all_publications():
+    """Récupère toutes les publications selon les permissions"""
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({"error": "Utilisateur non trouvé"}), 404
+
+    if current_user.type_compte == TypeCompteEnum.admin:
+        publications = Publication.query.all()
+    else:
+        publications = Publication.query.filter_by(id_utilisateur=current_user_id).all()
+
+    return jsonify([p.to_dict() for p in publications]), 200
+
+def get_publication_by_id(publication_id):
+    """Récupère une publication par son ID"""
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({"error": "Utilisateur non trouvé"}), 404
+
+    publication = Publication.query.get(publication_id)
+    if not publication:
+        return jsonify({"error": "Publication introuvable"}), 404
+
+    if publication.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "Non autorisé"}), 403
+
+    return jsonify(publication.to_dict()), 200
+
+def create_publication():
+    """Crée une nouvelle publication"""
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({"error": "Utilisateur non trouvé"}), 404
+
+    data = request.get_json()
+    required_fields = ["id_contenu", "id_plateforme", "titre_publication"]
+    missing_fields = [field for field in required_fields if field not in data]
+
+    if missing_fields:
+        return jsonify({"error": f"Champs manquants: {', '.join(missing_fields)}"}), 400
+
+    try:
+
+        contenu = Contenu.query.get(data["id_contenu"])
+        plateforme = Plateforme.query.get(data["id_plateforme"])
+
+        if not contenu or not plateforme:
+            return jsonify({"error": "Contenu ou plateforme introuvable"}), 404
+
+        if contenu.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
+            return jsonify({"error": "Non autorisé pour ce contenu"}), 403
+
+        statut = StatutPublicationEnum.brouillon
+        if "statut" in data:
+            try:
+                statut = StatutPublicationEnum(data["statut"])
+            except ValueError:
+                return jsonify({"error": "Statut de publication invalide"}), 400
+
+        publication = Publication(
+            id_utilisateur=current_user_id,
+            id_contenu=data["id_contenu"],
+            id_plateforme=data["id_plateforme"],
+            titre_publication=data["titre_publication"],
+            statut=statut,
+            date_programmee=datetime.fromisoformat(data["date_programmee"]) if data.get("date_programmee") else None,
+            parametres_publication=data.get("parametres_publication", {})
+        )
+
+        db.session.add(publication)
+        db.session.commit()
+
+        return jsonify({
+            "message": "Publication créée avec succès",
+            "publication": publication.to_dict()
+        }), 201
+
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({"error": f"Erreur de base de données: {str(e)}"}), 500
+
+def update_publication(publication_id):
+    """Met à jour une publication"""
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({"error": "Utilisateur non trouvé"}), 404
+
+    publication = Publication.query.get(publication_id)
+    if not publication:
+        return jsonify({"error": "Publication introuvable"}), 404
+
+    if publication.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "Non autorisé"}), 403
+
+    data = request.get_json()
+    try:
+        if "titre_publication" in data:
+            publication.titre_publication = data["titre_publication"]
+        if "statut" in data:
+            try:
+                publication.statut = StatutPublicationEnum(data["statut"])
+            except ValueError:
+                return jsonify({"error": "Statut invalide"}), 400
+        if "date_programmee" in data:
+            publication.date_programmee = datetime.fromisoformat(data["date_programmee"]) if data["date_programmee"] else None
+        if "parametres_publication" in data:
+            publication.parametres_publication = data["parametres_publication"]
+        if "url_publication" in data:
+            publication.url_publication = data["url_publication"]
+        if "id_externe" in data:
+            publication.id_externe = data["id_externe"]
+        if "message_erreur" in data:
+            publication.message_erreur = data["message_erreur"]
+
+        publication.date_modification = datetime.utcnow()
+        db.session.commit()
+
+        return jsonify({"message": "Publication mise à jour avec succès"}), 200
+
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({"error": f"Erreur de base de données: {str(e)}"}), 500
+
+def delete_publication(publication_id):
+    """Supprime une publication"""
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({"error": "Utilisateur non trouvé"}), 404
+
+    publication = Publication.query.get(publication_id)
+    if not publication:
+        return jsonify({"error": "Publication introuvable"}), 404
+
+    # Vérifier les permissions
+    if publication.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "Non autorisé"}), 403
+
+    try:
+        db.session.delete(publication)
+        db.session.commit()
+        return jsonify({"message": "Publication supprimée avec succès"}), 200
+
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        return jsonify({"error": f"Erreur de base de données: {str(e)}"}), 500

@@ -11,6 +11,9 @@ from app.routes.generateur_routes import ollama_bp
 from app.routes.contenu_routes import contenu_bp
 from app.routes.oaut_routes import oauth_bp
 from app.routes.auth_routes import auth_bp
+from app.routes.plateforme_routes import plateforme_bp
+from app.routes.historique_routes import historique_bp  
+from app.routes.publication_routes import publication_bp
 from dotenv import load_dotenv
 import os
 
@@ -64,6 +67,9 @@ def create_app():
         (prompt_bp, '/api/prompts'),
         (ollama_bp, '/api/generer'),
         (contenu_bp, "/api/contenu"),
+        (plateforme_bp, "/api/plateformes"),      
+        (historique_bp, "/api/historiques"),       
+        (publication_bp, "/api/publications"),
         (oauth_bp, "/api/oauth"),
         (auth_bp, "/api/auth")
     ]

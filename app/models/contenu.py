@@ -15,7 +15,6 @@ class Contenu(db.Model):
     id_model = db.Column(db.Integer, db.ForeignKey('model_ia.id', ondelete="CASCADE"), nullable=False)
     id_template = db.Column(db.Integer, db.ForeignKey('templates.id', ondelete="SET NULL"), nullable=True)
     id_prompt = db.Column(db.Integer, db.ForeignKey('prompt.id', ondelete="SET NULL"), nullable=True)
-
     titre = db.Column(db.String(255), nullable=True)
     type_contenu = db.Column(db.Enum(TypeContenuEnum), default=TypeContenuEnum.text, nullable=False)
     texte = db.Column(db.Text, nullable=True)

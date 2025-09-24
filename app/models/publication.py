@@ -14,7 +14,7 @@ class Publication(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     id_utilisateur = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable=False)
-    id_contenu = db.Column(db.Integer, db.ForeignKey('contenus.id'), nullable=False)
+    id_contenu = db.Column(db.Integer, db.ForeignKey('contenu.id'), nullable=False)
     id_plateforme = db.Column(db.Integer, db.ForeignKey('plateformes.id'), nullable=False)
     titre_publication = db.Column(db.String(255), nullable=False)
     statut = db.Column(db.Enum(StatutPublicationEnum), default=StatutPublicationEnum.brouillon)

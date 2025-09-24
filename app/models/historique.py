@@ -15,7 +15,7 @@ class Historique(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     id_utilisateur = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable=False)
-    id_contenu = db.Column(db.Integer, db.ForeignKey('contenus.id'))
+    id_contenu = db.Column(db.Integer, db.ForeignKey('contenu.id'))
     id_plateforme = db.Column(db.Integer, db.ForeignKey('plateformes.id'))
     type_action = db.Column(db.Enum(TypeActionEnum), nullable=False)
     description = db.Column(db.Text, nullable=False)

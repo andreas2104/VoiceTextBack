@@ -4,3 +4,6 @@ from .modelIA import ModelIA
 from .template import Template
 from .prompt import Prompt
 from .contenu import Contenu
+from .historique import Historique
+from .publication import Publication
+from .plateforme import Plateforme

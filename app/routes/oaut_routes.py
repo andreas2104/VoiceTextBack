@@ -313,3 +313,14 @@ def oauth_config():
         "admin_emails_count": len(ADMIN_EMAILS),
         "admin_emails": ADMIN_EMAILS if current_app.debug else "***hidden***"
     })
+
+
+
+from app.controllers.oaut_controller import OAuthController
+
+oauth_bp = Blueprint('oauth', __name__, url_prefix='/api/oauth')
+
+# Routes OAuth Facebook
+oauth_bp.route('/facebook/connect', methods=['GET'])(OAuthController.initier_connexion_facebook)
+oauth_bp.route('/facebook/callback', methods=['GET'])(OAuthController.callback_facebook)
+oauth_bp.route('/facebook/pages', methods=['GET'])(OAuthController.lister_pages_facebook)

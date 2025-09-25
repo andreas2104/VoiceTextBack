@@ -1,323 +1,293 @@
-from flask import request, jsonify
-from flask_jwt_extended import get_jwt_identity, jwt_required
-from sqlalchemy.exc import SQLAlchemyError, IntegrityError
-from datetime import datetime, timedelta
-
+from flask import request, jsonify, url_for
 from app.extensions import db
-from app.models.plateforme import Plateforme, TypePlateformeEnum, StatutConnexionEnum
-from app.models.utilisateur import Utilisateur
-from app.services.social_media_service import SocialMediaService  # Import du service
+from app.models.plateforme import PlateformeConfig, UtilisateurPlateforme, OAuthState
+from app.models.utilisateur import Utilisateur, TypeCompteEnum
+from flask_jwt_extended import get_jwt_identity
+from datetime import datetime
+import secrets
+import requests
+import json
 
-class PlateformeController:
+
+def create_plateforme():
+    """Création d’une plateforme (admin uniquement)"""
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+    if not current_user or current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Aucune donnée reçue"}), 400
+
+        nom = data.get("nom")
+        config = data.get("config", {})
+        active = data.get("active", True)
+
+        if not nom or not config.get("client_id") or not config.get("client_secret"):
+            return jsonify({"error": "Champs requis manquants: nom, client_id, client_secret"}), 400
+
+        # Vérifier doublon
+        if PlateformeConfig.query.filter_by(nom=nom).first():
+            return jsonify({"error": f"La plateforme {nom} existe déjà"}), 400
+
+        plateforme = PlateformeConfig(
+            nom=nom,
+            config=config,
+            active=active
+        )
+        db.session.add(plateforme)
+        db.session.commit()
+
+        return jsonify({
+            "message": f"Plateforme {nom} créée avec succès",
+            "id": plateforme.id
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+def get_plateformes():
+    """Lister toutes les plateformes actives"""
+    try:
+        plateformes = PlateformeConfig.get_active_platforms()
+        return jsonify([p.to_dict() for p in plateformes]), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def get_plateforme_by_id(plateforme_id):
+    """Récupérer une plateforme par ID"""
+    plateforme = PlateformeConfig.query.get(plateforme_id)
+    if not plateforme:
+        return jsonify({"error": "Plateforme introuvable"}), 404
+
+    return jsonify(plateforme.to_dict()), 200
+
+
+def update_plateforme(plateforme_id):
+    """Mise à jour d’une plateforme (admin uniquement)"""
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+    if not current_user or current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    plateforme = PlateformeConfig.query.get(plateforme_id)
+    if not plateforme:
+        return jsonify({"error": "Plateforme introuvable"}), 404
+
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Aucune donnée reçue"}), 400
+
+        plateforme.nom = data.get("nom", plateforme.nom)
+        config = data.get("config")
+        if config:
+            if isinstance(config, str):
+                try:
+                    config = json.loads(config)
+                except json.JSONDecodeError:
+                    return jsonify({"error": "Format JSON invalide pour config"}), 400
+            plateforme.config = config
+
+        plateforme.active = data.get("active", plateforme.active)
+        plateforme.date_modification = datetime.utcnow()
+
+        db.session.commit()
+        return jsonify({"message": "Plateforme mise à jour avec succès"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+def delete_plateforme(plateforme_id):
+    """Suppression d’une plateforme (admin uniquement)"""
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+    if not current_user or current_user.type_compte != TypeCompteEnum.admin:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    plateforme = PlateformeConfig.query.get(plateforme_id)
+    if not plateforme:
+        return jsonify({"error": "Plateforme introuvable"}), 404
+
+    try:
+        db.session.delete(plateforme)
+        db.session.commit()
+        return jsonify({"message": "Plateforme supprimée avec succès"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+# utilisateurplateform controler
+
+def get_connexions_utilisateur():
+    """Lister toutes les connexions d’un utilisateur"""
+    utilisateur_id = get_jwt_identity()
+    if not utilisateur_id:
+        return jsonify({"error": "Non authentifié"}), 401
+
+    try:
+        connexions = UtilisateurPlateforme.query.filter_by(utilisateur_id=utilisateur_id).all()
+        return jsonify([c.to_dict() for c in connexions]), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def deconnexion_plateforme(plateforme_nom):
+    """Déconnecter un utilisateur d’une plateforme"""
+    utilisateur_id = get_jwt_identity()
+    if not utilisateur_id:
+        return jsonify({"error": "Non authentifié"}), 401
+
+    try:
+        connexion = UtilisateurPlateforme.get_user_platform(utilisateur_id, plateforme_nom)
+        if connexion:
+            db.session.delete(connexion)
+            db.session.commit()
+        return jsonify({"message": f"Déconnexion {plateforme_nom} réussie"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
     
-    @staticmethod
-    @jwt_required()
-    def connecter_plateforme():
-        """Connecte une nouvelle plateforme (Facebook ou LinkedIn)"""
-        try:
-            current_user_id = get_jwt_identity()
-            data = request.get_json()
-            
-            # Validation des données
-            if not data:
-                return jsonify({"error": "Données JSON manquantes"}), 400
-            
-            required_fields = ["nom_plateforme", "access_token", "nom_compte"]
-            missing_fields = [field for field in required_fields if not data.get(field)]
-            
-            if missing_fields:
-                return jsonify({
-                    "error": f"Champs manquants: {', '.join(missing_fields)}"
-                }), 400
-            
-            # Validation du type de plateforme
-            try:
-                platform_type = TypePlateformeEnum(data["nom_plateforme"])
-            except ValueError:
-                return jsonify({
-                    "error": f"Plateforme non supportée. Plateformes disponibles: {[e.value for e in TypePlatformeEnum]}"
-                }), 400
-            
-            # Vérifier si l'utilisateur existe
-            user = Utilisateur.query.get(current_user_id)
-            if not user:
-                return jsonify({"error": "Utilisateur non trouvé"}), 404
-            
-            # Vérifier si la plateforme existe déjà pour cet utilisateur
-            existing_platform = Plateforme.get_by_user_and_platform(current_user_id, platform_type)
-            
-            if existing_platform:
-                # Mettre à jour la plateforme existante
-                existing_platform.access_token = data["access_token"]
-                existing_platform.refresh_token = data.get("refresh_token")
-                existing_platform.nom_compte = data["nom_compte"]
-                existing_platform.id_compte_externe = data.get("id_compte_externe")
-                existing_platform.token_expiration = datetime.utcnow() + timedelta(days=60)
-                existing_platform.statut_connexion = StatutConnexionEnum.CONNECTE
-                existing_platform.permissions_accordees = data.get("permissions", [])
-                existing_platform.actif = True
-                existing_platform.date_modification = datetime.utcnow()
-                
-                plateforme = existing_platform
-                message = "Plateforme mise à jour avec succès"
-            else:
-                # Créer une nouvelle plateforme
-                plateforme = Plateforme(
-                    id_utilisateur=current_user_id,
-                    nom_plateforme=platform_type,
-                    nom_compte=data["nom_compte"],
-                    id_compte_externe=data.get("id_compte_externe"),
-                    access_token=data["access_token"],
-                    refresh_token=data.get("refresh_token"),
-                    token_expiration=datetime.utcnow() + timedelta(days=60),
-                    statut_connexion=StatutConnexionEnum.CONNECTE,
-                    permissions_accordees=data.get("permissions", []),
-                    limite_posts_jour=data.get("limite_posts_jour", 25)
-                )
-                db.session.add(plateforme)
-                message = "Plateforme connectée avec succès"
-            
-            db.session.commit()
-            
-            # Vérifier le statut du token après la connexion
-            SocialMediaService.verifier_statut_token(plateforme)
-            
-            return jsonify({
-                "success": True,
-                "message": message,
-                "data": plateforme.to_dict()
-            }), 201
-            
-        except IntegrityError:
-            db.session.rollback()
-            return jsonify({"error": "Cette plateforme est déjà connectée"}), 409
-        except SQLAlchemyError as e:
-            db.session.rollback()
-            return jsonify({"error": "Erreur de base de données"}), 500
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({"error": str(e)}), 500
 
-    @staticmethod
-    @jwt_required()
-    def lister_plateformes():
-        """Liste toutes les plateformes de l'utilisateur connecté"""
-        try:
-            current_user_id = get_jwt_identity()
-            
-            plateformes = Plateforme.query.filter_by(id_utilisateur=current_user_id).all()
-            
-            return jsonify({
-                "success": True,
-                "data": [p.to_dict() for p in plateformes],
-                "count": len(plateformes)
-            }), 200
-            
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+# oauthplateformecontroller
 
-    @staticmethod
-    @jwt_required()
-    def obtenir_plateforme(plateforme_id):
-        """Obtient les détails d'une plateforme spécifique"""
-        try:
-            current_user_id = get_jwt_identity()
-            
-            plateforme = Plateforme.query.get(plateforme_id)
-            if not plateforme:
-                return jsonify({"error": "Plateforme non trouvée"}), 404
-            
-            # Vérifier que la plateforme appartient à l'utilisateur
-            if plateforme.id_utilisateur != current_user_id:
-                return jsonify({"error": "Accès non autorisé"}), 403
-            
-            return jsonify({
-                "success": True,
-                "data": plateforme.to_dict()
-            }), 200
-            
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+def initier_connexion_oauth(plateforme_nom):
+    """Initier le processus OAuth"""
+    utilisateur_id = get_jwt_identity()
+    if not utilisateur_id:
+        return jsonify({"error": "Utilisateur non authentifié"}), 401
 
-    @staticmethod
-    @jwt_required()
-    def deconnecter_plateforme(plateforme_id):
-        """Déconnecte une plateforme"""
-        try:
-            current_user_id = get_jwt_identity()
-            
-            plateforme = Plateforme.query.get(plateforme_id)
-            if not plateforme:
-                return jsonify({"error": "Plateforme non trouvée"}), 404
-            
-            # Vérifier que la plateforme appartient à l'utilisateur
-            if plateforme.id_utilisateur != current_user_id:
-                return jsonify({"error": "Accès non autorisé"}), 403
-            
-            # Mettre à jour le statut de connexion
-            plateforme.statut_connexion = StatutConnexionEnum.DECONNECTE
-            plateforme.actif = False
-            plateforme.access_token = None
-            plateforme.refresh_token = None
-            plateforme.token_expiration = None
-            plateforme.date_modification = datetime.utcnow()
-            
-            db.session.commit()
-            
-            return jsonify({
-                "success": True,
-                "message": "Plateforme déconnectée avec succès",
-                "data": plateforme.to_dict()
-            }), 200
-            
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({"error": str(e)}), 500
+    plateforme = PlateformeConfig.get_platform_by_name(plateforme_nom)
+    if not plateforme:
+        return jsonify({"error": f"Plateforme {plateforme_nom} non trouvée"}), 404
 
-    @staticmethod
-    @jwt_required()
-    def obtenir_statistiques(plateforme_id):
-        """Obtient les statistiques d'une plateforme"""
-        try:
-            current_user_id = get_jwt_identity()
-            
-            plateforme = Plateforme.query.get(plateforme_id)
-            if not plateforme:
-                return jsonify({"error": "Plateforme non trouvée"}), 404
-            
-            # Vérifier que la plateforme appartient à l'utilisateur
-            if plateforme.id_utilisateur != current_user_id:
-                return jsonify({"error": "Accès non autorisé"}), 403
-            
-            # Calculer les statistiques
-            stats = {
-                "plateforme_info": plateforme.to_dict(),
-                "peut_publier": plateforme.peut_publier_aujourd_hui(),
-                "token_valide": plateforme.is_token_valid(),
-                "posts_restants_aujourd_hui": plateforme.limite_posts_jour - plateforme.posts_publies_aujourd_hui,
-                "pourcentage_utilisation": round((plateforme.posts_publies_aujourd_hui / plateforme.limite_posts_jour) * 100, 2) if plateforme.limite_posts_jour > 0 else 0
-            }
-            
-            return jsonify({
-                "success": True,
-                "data": stats
-            }), 200
-            
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+    try:
+        state = secrets.token_urlsafe(32)
+        oauth_state = OAuthState(state=state, utilisateur_id=utilisateur_id, plateforme_id=plateforme.id)
+        db.session.add(oauth_state)
+        db.session.commit()
 
-    @staticmethod
-    @jwt_required()
-    def verifier_statut_connexion():
-        """Vérifie le statut de connexion de toutes les plateformes de l'utilisateur"""
-        try:
-            current_user_id = get_jwt_identity()
-            
-            plateformes = Plateforme.get_active_platforms(current_user_id)
-            
-            statuts = []
-            for plateforme in plateformes:
-                # Vérifier le statut actuel du token via le service
-                SocialMediaService.verifier_statut_token(plateforme)
-                
-                statut = {
-                    "id": plateforme.id,
-                    "nom_plateforme": plateforme.nom_plateforme.value,
-                    "nom_compte": plateforme.nom_compte,
-                    "statut_connexion": plateforme.statut_connexion.value,
-                    "token_valide": plateforme.is_token_valid(),
-                    "peut_publier": plateforme.peut_publier_aujourd_hui()
-                }
-                statuts.append(statut)
-            
-            return jsonify({
-                "success": True,
-                "data": statuts
-            }), 200
-            
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+        auth_url = _construire_url_authorisation(plateforme, state)
 
-    @staticmethod
-    @jwt_required()
-    def publier_sur_plateforme(plateforme_id):
-        """Publie du contenu sur une plateforme spécifique"""
-        try:
-            current_user_id = get_jwt_identity()
-            data = request.get_json()
-            
-            # Validation des données
-            if not data or not data.get('contenu'):
-                return jsonify({"error": "Contenu de publication manquant"}), 400
-            
-            # Récupérer la plateforme
-            plateforme = Plateforme.query.get(plateforme_id)
-            if not plateforme:
-                return jsonify({"error": "Plateforme non trouvée"}), 404
-            
-            # Vérifier les permissions
-            if plateforme.id_utilisateur != current_user_id:
-                return jsonify({"error": "Accès non autorisé"}), 403
-            
-            if not plateforme.is_token_valid():
-                return jsonify({"error": "Token de plateforme expiré"}), 400
-            
-            if not plateforme.peut_publier_aujourd_hui():
-                return jsonify({"error": "Limite de publications quotidienne atteinte"}), 400
-            
-            # Utiliser le service pour publier
-            contenu = data['contenu']
-            image_url = data.get('image_url')
-            
-            if plateforme.nom_plateforme == TypePlateformeEnum.FACEBOOK:
-                result = SocialMediaService.publier_sur_facebook(
-                    plateforme, contenu, image_url
-                )
-            elif plateforme.nom_plateforme == TypePlateformeEnum.LINKEDIN:
-                result = SocialMediaService.publier_sur_linkedin(
-                    plateforme, contenu, image_url
-                )
-            else:
-                return jsonify({"error": "Plateforme non supportée"}), 400
-            
-            if result['success']:
-                return jsonify({
-                    "success": True,
-                    "message": "Publication réussie",
-                    "data": result
-                }), 200
-            else:
-                return jsonify({
-                    "success": False,
-                    "error": result['error']
-                }), 400
-                
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+        return jsonify({"auth_url": auth_url, "state": state}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
-    @staticmethod
-    @jwt_required()
-    def rafraichir_token(plateforme_id):
-        """Tente de rafraîchir le token d'une plateforme"""
-        try:
-            current_user_id = get_jwt_identity()
-            
-            plateforme = Plateforme.query.get(plateforme_id)
-            if not plateforme:
-                return jsonify({"error": "Plateforme non trouvée"}), 404
-            
-            if plateforme.id_utilisateur != current_user_id:
-                return jsonify({"error": "Accès non autorisé"}), 403
-            
-            # Vérifier le statut actuel
-            token_valide = SocialMediaService.verifier_statut_token(plateforme)
-            
-            return jsonify({
-                "success": True,
-                "token_valide": token_valide,
-                "statut_connexion": plateforme.statut_connexion.value,
-                "message": "Statut du token vérifié avec succès"
-            }), 200
-            
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+
+def _construire_url_authorisation(plateforme, state):
+    client_id = plateforme.get_client_id()
+    scopes = plateforme.get_scopes()
+    redirect_uri = url_for("plateforme_bp.callback_oauth", plateforme_nom=plateforme.nom, _external=True)
+
+    if plateforme.nom == "facebook":
+        return (f"https://www.facebook.com/v12.0/dialog/oauth?"
+                f"client_id={client_id}&redirect_uri={redirect_uri}&"
+                f"scope={','.join(scopes)}&state={state}")
+    elif plateforme.nom == "linkedin":
+        return (f"https://www.linkedin.com/oauth/v2/authorization?"
+                f"response_type=code&client_id={client_id}&redirect_uri={redirect_uri}&"
+                f"scope={' '.join(scopes)}&state={state}")
+    raise ValueError(f"Plateforme non supportée: {plateforme.nom}")
+
+
+def callback_oauth(plateforme_nom):
+    """Callback après OAuth (récupérer token + créer connexion utilisateur)"""
+    code = request.args.get("code")
+    state = request.args.get("state")
+    error = request.args.get("error")
+
+    if error:
+        return jsonify({"error": f"Erreur d’autorisation: {error}"}), 400
+
+    oauth_state = OAuthState.query.filter_by(state=state).first()
+    if not oauth_state or not oauth_state.is_valid():
+        return jsonify({"error": "État OAuth invalide ou expiré"}), 400
+
+    try:
+        oauth_state.mark_as_used()
+        db.session.commit()
+
+        token_data = _echanger_code_contre_token(plateforme_nom, code, oauth_state)
+        if not token_data or "access_token" not in token_data:
+            return jsonify({"error": "Échec échange token"}), 400
+
+        connexion = UtilisateurPlateforme.get_user_platform(oauth_state.utilisateur_id, plateforme_nom)
+        if not connexion:
+            connexion = UtilisateurPlateforme(
+                utilisateur_id=oauth_state.utilisateur_id,
+                plateforme_id=oauth_state.plateforme_id
+            )
+            db.session.add(connexion)
+
+        connexion.update_token(
+            access_token=token_data["access_token"],
+            expires_in=token_data.get("expires_in")
+        )
+
+        profil_data = _recuperer_infos_profil(plateforme_nom, token_data["access_token"])
+        if profil_data:
+            connexion.meta = profil_data
+            connexion.external_id = profil_data.get("id")
+
+        db.session.commit()
+        return jsonify({"message": f"Connexion réussie à {plateforme_nom}", "data": connexion.to_dict()}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+def _echanger_code_contre_token(plateforme_nom, code, oauth_state):
+    plateforme = PlateformeConfig.query.get(oauth_state.plateforme_id)
+    redirect_uri = url_for("plateforme_bp.callback_oauth", plateforme_nom=plateforme_nom, _external=True)
+
+    if plateforme.nom == "facebook":
+        response = requests.get("https://graph.facebook.com/v12.0/oauth/access_token", params={
+            "client_id": plateforme.get_client_id(),
+            "client_secret": plateforme.get_client_secret(),
+            "redirect_uri": redirect_uri,
+            "code": code
+        })
+    elif plateforme.nom == "linkedin":
+        response = requests.post("https://www.linkedin.com/oauth/v2/accessToken", data={
+            "client_id": plateforme.get_client_id(),
+            "client_secret": plateforme.get_client_secret(),
+            "redirect_uri": redirect_uri,
+            "code": code,
+            "grant_type": "authorization_code"
+        })
+    else:
+        raise ValueError(f"Plateforme non supportée: {plateforme_nom}")
+
+    return response.json() if response.status_code == 200 else None
+
+
+def _recuperer_infos_profil(plateforme_nom, access_token):
+    try:
+        if plateforme_nom == "facebook":
+            response = requests.get(
+                "https://graph.facebook.com/me",
+                params={"access_token": access_token, "fields": "id,name,email"}
+            )
+        elif plateforme_nom == "linkedin":
+            response = requests.get(
+                "https://api.linkedin.com/v2/me",
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+        else:
+            return None
+        return response.json() if response.status_code == 200 else None
+    except Exception:
+        return None

@@ -1,130 +1,129 @@
-# app/models/plateforme.py
+from datetime import datetime, timedelta
 from app.extensions import db
-from datetime import datetime
-from enum import Enum
+from sqlalchemy import JSON
 
-class TypePlateformeEnum(Enum):
-    FACEBOOK = "facebook"
-    LINKEDIN = "linkedin"
-
-class StatutConnexionEnum(Enum):
-    CONNECTE = "connecte"
-    DECONNECTE = "deconnecte"
-    EXPIRE = "expire"
-    ERREUR = "erreur"
-
-class Plateforme(db.Model):
-    __tablename__ = 'plateformes'
+class PlateformeConfig(db.Model):
+    __tablename__ = 'plateforme_config'
     
-    # Clés primaires et étrangères
     id = db.Column(db.Integer, primary_key=True)
-    id_utilisateur = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable=False)
-    
-    # Informations de la plateforme
-    nom_plateforme = db.Column(db.Enum(TypePlateformeEnum), nullable=False)
-    nom_compte = db.Column(db.String(100), nullable=False)
-    id_compte_externe = db.Column(db.String(100))
-    
-    # Tokens et authentification
-    access_token = db.Column(db.Text)
-    refresh_token = db.Column(db.Text)
-    token_expiration = db.Column(db.DateTime)
-    statut_connexion = db.Column(db.Enum(StatutConnexionEnum), default=StatutConnexionEnum.DECONNECTE)
-    
-    # Paramètres et limites
-    permissions_accordees = db.Column(db.JSON, default=list)
-    limite_posts_jour = db.Column(db.Integer, default=25)
-    posts_publies_aujourd_hui = db.Column(db.Integer, default=0)
-    
-    # Dates de suivi
-    derniere_publication = db.Column(db.DateTime)
-    derniere_synchronisation = db.Column(db.DateTime)
-    
-    # Statut et dates système
-    actif = db.Column(db.Boolean, default=True)
-    date_creation = db.Column(db.DateTime, default=datetime.utcnow)
-    date_modification = db.Column(db.DateTime, onupdate=datetime.utcnow)
-
-    # Relations
-    publications = db.relationship('Publication', backref='plateforme_ref', lazy=True)
-
-    # Contrainte d'unicité : un utilisateur ne peut avoir qu'une seule connexion par plateforme
-    __table_args__ = (
-        db.UniqueConstraint('id_utilisateur', 'nom_plateforme', name='unique_user_platform'),
-    )
-
-    def __repr__(self):
-        return f'<Plateforme {self.nom_plateforme.value} - {self.nom_compte}>'
+    nom = db.Column(db.String(80), unique=True, nullable=False)
+    config = db.Column(JSON, default=dict)
+    active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def to_dict(self):
-        """Convertit l'objet en dictionnaire pour l'API"""
         return {
             'id': self.id,
-            'id_utilisateur': self.id_utilisateur,
-            'nom_plateforme': self.nom_plateforme.value,
-            'nom_compte': self.nom_compte,
-            'id_compte_externe': self.id_compte_externe,
-            'statut_connexion': self.statut_connexion.value,
-            'token_expiration': self.token_expiration.isoformat() if self.token_expiration else None,
-            'permissions_accordees': self.permissions_accordees or [],
-            'limite_posts_jour': self.limite_posts_jour,
-            'posts_publies_aujourd_hui': self.posts_publies_aujourd_hui,
-            'derniere_publication': self.derniere_publication.isoformat() if self.derniere_publication else None,
-            'derniere_synchronisation': self.derniere_synchronisation.isoformat() if self.derniere_synchronisation else None,
-            'actif': self.actif,
-            'date_creation': self.date_creation.isoformat(),
-            'date_modification': self.date_modification.isoformat() if self.date_modification else None
+            'nom': self.nom,
+            'config': self.config,
+            'active': self.active,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
-
-    def is_token_valid(self):
-        """Vérifie si le token est encore valide"""
-        if not self.access_token or not self.token_expiration:
-            return False
-        return datetime.utcnow() < self.token_expiration
-
-    def peut_publier_aujourd_hui(self):
-        """Vérifie si on peut encore publier aujourd'hui"""
-        return self.posts_publies_aujourd_hui < self.limite_posts_jour
-
-    def get_api_config(self):
-        """Retourne la configuration API selon la plateforme"""
-        if self.nom_plateforme == TypePlateformeEnum.FACEBOOK:
-            return {
-                'base_url': 'https://graph.facebook.com/v18.0',
-                'endpoints': {
-                    'page_posts': f'/{self.id_compte_externe}/feed',
-                    'page_info': f'/{self.id_compte_externe}',
-                },
-                'required_permissions': ['pages_manage_posts', 'pages_read_engagement']
-            }
-        elif self.nom_plateforme == TypePlateformeEnum.LINKEDIN:
-            return {
-                'base_url': 'https://api.linkedin.com/v2',
-                'endpoints': {
-                    'shares': '/shares',
-                    'ugcPosts': '/ugcPosts'
-                },
-                'required_permissions': ['w_member_social']
-            }
-        return {}
-
-    def incrementer_posts_aujourd_hui(self):
-        """Incrémente le compteur de posts du jour"""
-        self.posts_publies_aujourd_hui += 1
-        self.derniere_publication = datetime.utcnow()
-
+    
+    def get_client_id(self):
+        return self.config.get('client_id')
+    
+    def get_client_secret(self):
+        return self.config.get('client_secret')
+    
+    def get_scopes(self):
+        return self.config.get('scopes', [])
+    
+    def is_active(self):
+        return self.active
+    
+    def update_config(self, new_config):
+        self.config.update(new_config)
+        self.updated_at = datetime.utcnow()
+    
     @classmethod
-    def get_by_user_and_platform(cls, user_id, platform_type):
-        """Récupère une plateforme par utilisateur et type"""
-        return cls.query.filter_by(
-            id_utilisateur=user_id,
-            nom_plateforme=platform_type
+    def get_active_platforms(cls):
+        return cls.query.filter_by(active=True).all()
+    
+    @classmethod
+    def get_platform_by_name(cls, nom):
+        return cls.query.filter_by(nom=nom, active=True).first()
+
+
+class UtilisateurPlateforme(db.Model):
+    __tablename__ = 'utilisateur_plateforme'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    utilisateur_id = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable=False)
+    plateforme_id = db.Column(db.Integer, db.ForeignKey('plateforme_config.id'), nullable=False)
+    external_id = db.Column(db.String(200), nullable=True)
+    access_token = db.Column(db.Text, nullable=True)
+    token_expires_at = db.Column(db.DateTime, nullable=True)
+    meta = db.Column(JSON, default={})
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    utilisateur = db.relationship('Utilisateur', backref=db.backref('plateformes', lazy=True))
+    plateforme = db.relationship('PlateformeConfig', backref=db.backref('utilisateurs', lazy=True))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'utilisateur_id': self.utilisateur_id,
+            'plateforme_id': self.plateforme_id,
+            'external_id': self.external_id,
+            'token_expires_at': self.token_expires_at.isoformat() if self.token_expires_at else None,
+            'meta': self.meta,
+            'plateforme_nom': self.plateforme.nom if self.plateforme else None,
+            'token_valide': self.is_token_valid()
+        }
+    
+    def is_token_valid(self):
+        if not self.token_expires_at or not self.access_token:
+            return False
+        return self.token_expires_at > datetime.utcnow()
+    
+    def update_token(self, access_token, expires_in=None, expires_at=None):
+        self.access_token = access_token
+        if expires_at:
+            self.token_expires_at = expires_at
+        elif expires_in:
+            self.token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+        self.updated_at = datetime.utcnow()
+    
+    @classmethod
+    def get_user_platform(cls, utilisateur_id, plateforme_nom):
+        return cls.query.join(PlateformeConfig).filter(
+            cls.utilisateur_id == utilisateur_id,
+            PlateformeConfig.nom == plateforme_nom
         ).first()
 
-    @classmethod
-    def get_active_platforms(cls, user_id):
-        """Récupère toutes les plateformes actives d'un utilisateur"""
-        return cls.query.filter_by(
-            id_utilisateur=user_id,
-            actif=True
-        ).all()
+
+class OAuthState(db.Model):
+    __tablename__ = 'oauth_state'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    state = db.Column(db.String(255), unique=True, nullable=False)
+    utilisateur_id = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable=False)
+    plateforme_id = db.Column(db.Integer, db.ForeignKey('plateforme_config.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    used = db.Column(db.Boolean, default=False)
+
+    utilisateur = db.relationship('Utilisateur', backref=db.backref('oauth_states', lazy=True))
+    plateforme = db.relationship('PlateformeConfig', backref=db.backref('oauth_states', lazy=True))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'state': self.state,
+            'utilisateur_id': self.utilisateur_id,
+            'plateforme_id': self.plateforme_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'used': self.used
+        }
+    
+    def is_valid(self, timeout_minutes=10):
+        if self.used:
+            return False
+        expiration_time = self.created_at + timedelta(minutes=timeout_minutes)
+        return datetime.utcnow() < expiration_time
+    
+    def mark_as_used(self):
+        self.used = True

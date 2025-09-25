@@ -60,12 +60,22 @@ def google_callback():
       return jsonify({"error": "No email found in Google response"}), 400
 
     # ⚡ ICI : soit tu crées l'utilisateur en DB s'il n'existe pas, soit tu le récupères
-    # from models import Utilisateur, db
-    # utilisateur = Utilisateur.query.filter_by(email=email).first()
-    # if not utilisateur:
-    #     utilisateur = Utilisateur(email=email, mot_de_passe="", type_compte=TypeCompteEnum.utilisateur)
-    #     db.session.add(utilisateur)
-    #     db.session.commit()
+  from models import Utilisateur,TypeCompteEnum 
+  from app.extensions import db
+
+  utilisateur = Utilisateur.query.filter_by(email=email).first()
+  if not utilisateur:
+        utilisateur = Utilisateur(    
+          email = email
+          nom = user_info.get('given_name',''),
+          prenom = user_info.get('family_name',''),
+          mot_de_passe = ""
+          type_compte = TypeCompteEnum.user,
+          actif=True
+        )
+        # utilisateur = Utilisateur(email=email, mot_de_passe="", type_compte=TypeCompteEnum.utilisateur)
+        db.session.add(utilisateur)
+        db.session.commit()
 
     # Générer un JWT de ton backend
   token_payload = {
@@ -76,187 +86,3 @@ def google_callback():
 
   return jsonify({"token": token, "user": user_info}), 200
   
-
-  # pour facebook
-
-from flask import request, jsonify, redirect, session
-from flask_jwt_extended import jwt_required, get_jwt_identity
-from datetime import datetime, timedelta
-from urllib.parse import urlparse, parse_qs
-
-from app.extensions import db
-from app.models.plateforme import Plateforme, TypePlateformeEnum, StatutConnexionEnum
-from app.services.facebook_oauth_service import FacebookOAuthService
-
-class OAuthController:
-    
-    @staticmethod
-    @jwt_required()
-    def initier_connexion_facebook():
-        """Initie la connexion OAuth Facebook"""
-        try:
-            # Générer l'URL d'autorisation
-            auth_url = FacebookOAuthService.get_authorization_url()
-            
-            return jsonify({
-                'success': True,
-                'auth_url': auth_url,
-                'message': 'Redirections vers Facebook pour autorisation'
-            }), 200
-            
-        except Exception as e:
-            return jsonify({
-                'success': False,
-                'error': str(e)
-            }), 500
-    
-    @staticmethod
-    @jwt_required()
-    def callback_facebook():
-        """Traite le callback OAuth Facebook"""
-        try:
-            current_user_id = get_jwt_identity()
-            
-            # Récupérer le code d'autorisation
-            code = request.args.get('code')
-            error = request.args.get('error')
-            
-            if error:
-                return jsonify({
-                    'success': False,
-                    'error': f'Facebook authorization error: {error}'
-                }), 400
-            
-            if not code:
-                return jsonify({
-                    'success': False,
-                    'error': 'Authorization code not received'
-                }), 400
-            
-            # Étape 1: Échanger le code contre un token
-            token_result = FacebookOAuthService.exchange_code_for_token(code)
-            if not token_result['success']:
-                return jsonify({
-                    'success': False,
-                    'error': token_result['error']
-                }), 400
-            
-            short_token = token_result['access_token']
-            
-            # Étape 2: Obtenir un token longue durée
-            long_token_result = FacebookOAuthService.get_long_lived_token(short_token)
-            if not long_token_result['success']:
-                return jsonify({
-                    'success': False,
-                    'error': long_token_result['error']
-                }), 400
-            
-            long_lived_token = long_token_result['access_token']
-            expires_in = long_token_result['expires_in']
-            
-            # Étape 3: Récupérer les pages de l'utilisateur
-            pages_result = FacebookOAuthService.get_user_pages(long_lived_token)
-            if not pages_result['success']:
-                return jsonify({
-                    'success': False,
-                    'error': pages_result['error']
-                }), 400
-            
-            pages = pages_result['pages']
-            
-            if not pages:
-                return jsonify({
-                    'success': False,
-                    'error': 'Aucune page Facebook trouvée ou permissions insuffisantes'
-                }), 400
-            
-            # Étape 4: Sauvegarder les plateformes
-            connected_pages = []
-            for page in pages:
-                # Chercher si la page existe déjà
-                existing_platform = Plateforme.query.filter_by(
-                    id_utilisateur=current_user_id,
-                    nom_plateforme=TypePlateformeEnum.FACEBOOK,
-                    id_compte_externe=page['id']
-                ).first()
-                
-                if existing_platform:
-                    # Mettre à jour
-                    existing_platform.access_token = page['access_token']
-                    existing_platform.nom_compte = page['name']
-                    existing_platform.token_expiration = datetime.utcnow() + timedelta(seconds=expires_in)
-                    existing_platform.statut_connexion = StatutConnexionEnum.CONNECTE
-                    existing_platform.actif = True
-                    existing_platform.date_modification = datetime.utcnow()
-                    platform = existing_platform
-                else:
-                    # Créer nouvelle plateforme
-                    platform = Plateforme(
-                        id_utilisateur=current_user_id,
-                        nom_plateforme=TypePlateformeEnum.FACEBOOK,
-                        nom_compte=page['name'],
-                        id_compte_externe=page['id'],
-                        access_token=page['access_token'],
-                        token_expiration=datetime.utcnow() + timedelta(seconds=expires_in),
-                        statut_connexion=StatutConnexionEnum.CONNECTE,
-                        permissions_accordees=['pages_manage_posts', 'pages_read_engagement'],
-                        limite_posts_jour=25
-                    )
-                    db.session.add(platform)
-                
-                connected_pages.append(platform.to_dict())
-            
-            db.session.commit()
-            
-            return jsonify({
-                'success': True,
-                'message': f'{len(connected_pages)} page(s) Facebook connectée(s)',
-                'data': connected_pages
-            }), 200
-            
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({
-                'success': False,
-                'error': str(e)
-            }), 500
-    
-    @staticmethod
-    @jwt_required()
-    def lister_pages_facebook():
-        """Liste les pages Facebook disponibles (pour re-sélection)"""
-        try:
-            current_user_id = get_jwt_identity()
-            
-            # Récupérer une plateforme Facebook existante pour le token
-            platform = Plateforme.query.filter_by(
-                id_utilisateur=current_user_id,
-                nom_plateforme=TypePlateformeEnum.FACEBOOK,
-                statut_connexion=StatutConnexionEnum.CONNECTE
-            ).first()
-            
-            if not platform or not platform.is_token_valid():
-                return jsonify({
-                    'success': False,
-                    'error': 'Aucune connexion Facebook valide trouvée. Veuillez vous reconnecter.'
-                }), 400
-            
-            # Utiliser le token de l'utilisateur (pas de page) pour lister les pages
-            pages_result = FacebookOAuthService.get_user_pages(platform.access_token)
-            
-            if not pages_result['success']:
-                return jsonify({
-                    'success': False,
-                    'error': pages_result['error']
-                }), 400
-            
-            return jsonify({
-                'success': True,
-                'data': pages_result['pages']
-            }), 200
-            
-        except Exception as e:
-            return jsonify({
-                'success': False,
-                'error': str(e)
-            }), 500

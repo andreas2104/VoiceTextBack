@@ -316,11 +316,11 @@ def oauth_config():
 
 
 
-from app.controllers.oaut_controller import OAuthController
+# from app.controllers.oaut_controller import OAuthController
 
-oauth_bp = Blueprint('oauth', __name__, url_prefix='/api/oauth')
+# oauth_bp = Blueprint('oauth', __name__, url_prefix='/api/oauth')
 
-# Routes OAuth Facebook
-oauth_bp.route('/facebook/connect', methods=['GET'])(OAuthController.initier_connexion_facebook)
-oauth_bp.route('/facebook/callback', methods=['GET'])(OAuthController.callback_facebook)
-oauth_bp.route('/facebook/pages', methods=['GET'])(OAuthController.lister_pages_facebook)
+# # Routes OAuth Facebook
+# oauth_bp.route('/facebook/connect', methods=['GET'])(OAuthController.initier_connexion_facebook)
+# oauth_bp.route('/facebook/callback', methods=['GET'])(OAuthController.callback_facebook)
+# oauth_bp.route('/facebook/pages', methods=['GET'])(OAuthController.lister_pages_facebook)

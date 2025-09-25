@@ -47,40 +47,50 @@ def get_utilisateur_by_id(utilisateur_id):
 
 
 def update_utilisateur(utilisateur_id):
-    current_user_id = get_jwt_identity()
-    current_user = Utilisateur.query.get(current_user_id)
-
-    if current_user_id != utilisateur_id and current_user.type_compte != TypeCompteEnum.admin:
-        return jsonify({"error": "Unauthorized"}), 403
-
-    data = request.json
-    utilisateur = Utilisateur.query.get(utilisateur_id)
-    if not utilisateur:
-        return jsonify({"error": "Utilisateur not found"}), 404
-    
-    if 'mot_de_passe' in data:
-        data['mot_de_passe'] = generate_password_hash(data['mot_de_passe'])
-
-    if 'photo' in data:
-       utilisateur.photo = data['photo']
-
-    if 'type_compte' in data and current_user.type_compte != TypeCompteEnum.admin:
-        return jsonify({"error": "Unauthorized to change account type"}), 403
-    
-    for key, value in data.items():
-        if hasattr(utilisateur, key):      
-            if key == 'type_compte' and isinstance(value, str):
-                try:
-                    value = TypeCompteEnum(value)
-                except ValueError:
-                    return jsonify({"error": "Invalid type_compte value"}), 400
-            setattr(utilisateur, key, value)   
     try:
+        current_user_id = get_jwt_identity()
+        current_user = Utilisateur.query.get(current_user_id)
+        if not current_user:
+            return jsonify({"error": "Utilisateur courant non trouvé"}), 404
+
+        # Vérification : seul l'admin peut modifier un autre utilisateur
+        if current_user_id != utilisateur_id and current_user.type_compte != TypeCompteEnum.admin:
+            return jsonify({"error": "Unauthorized"}), 403
+
+        data = request.json
+        utilisateur = Utilisateur.query.get(utilisateur_id)
+        if not utilisateur:
+            return jsonify({"error": "Utilisateur non trouvé"}), 404
+
+        # Gestion du mot de passe
+        if "mot_de_passe" in data and data["mot_de_passe"]:
+            utilisateur.mot_de_passe = generate_password_hash(data["mot_de_passe"])
+
+        # Gestion de la photo
+        if "photo" in data:
+            utilisateur.photo = data["photo"]
+
+        # Gestion du type_compte : seul un admin peut changer le rôle
+        if "type_compte" in data:
+            if current_user.type_compte != TypeCompteEnum.admin:
+                return jsonify({"error": "Unauthorized to change account type"}), 403
+            try:
+                utilisateur.type_compte = TypeCompteEnum(data["type_compte"])
+            except ValueError:
+                return jsonify({"error": "Invalid type_compte value"}), 400
+
+        # Autres champs
+        for key in ["nom", "prenom", "email", "actif"]:
+            if key in data:
+                setattr(utilisateur, key, data[key])
+
         db.session.commit()
-        return jsonify({"message": "Utilisateur updated successfully"}), 200
+        return jsonify({"message": "Utilisateur mis à jour avec succès"}), 200
+
     except Exception as e:
         db.session.rollback()
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": str(e)}), 500
+
 
 
 def delete_utilisateur(utilisateur_id):  

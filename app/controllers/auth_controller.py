@@ -4,7 +4,9 @@ from app.models.utilisateur import Utilisateur, TypeCompteEnum
 from app.extensions import db
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import create_access_token, create_refresh_token, get_jwt_identity, jwt_required, get_jwt, unset_jwt_cookies
+import os
 
+ADMIN_EMAILS = os.getenv('ADMIN_EMAILS', '').split(",")
 def register():
 
     data = request.json
@@ -46,6 +48,10 @@ def login():
     if not utilisateur or not check_password_hash(utilisateur.mot_de_passe, data['mot_de_passe']):
         return jsonify({"error": "Invalid email or password"}), 401
     
+    if utilisateur.email.lower() in [e.lower() for e in ADMIN_EMAILS]:
+        if utilisateur.type_compte != TypeCompteEnum.admin:
+            utilisateur.type_compte = TypeCompteEnum.admin
+            db.session.commit()
   
     access_token = create_access_token(identity=utilisateur.id)
     refresh_token = create_refresh_token(identity=utilisateur.id)

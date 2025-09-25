@@ -3,7 +3,7 @@ from app.extensions import db
 from app.models.publication import Publication, StatutPublicationEnum
 from app.models.utilisateur import Utilisateur, TypeCompteEnum
 from app.models.contenu import Contenu
-from app.models.plateforme import Plateforme
+from app.models.plateforme import PlateformeConfig # Ligne corrigée ici
 from flask_jwt_extended import get_jwt_identity
 from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
@@ -58,7 +58,7 @@ def create_publication():
     try:
 
         contenu = Contenu.query.get(data["id_contenu"])
-        plateforme = Plateforme.query.get(data["id_plateforme"])
+        plateforme = PlateformeConfig.query.get(data["id_plateforme"]) 
 
         if not contenu or not plateforme:
             return jsonify({"error": "Contenu ou plateforme introuvable"}), 404

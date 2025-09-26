@@ -30,8 +30,17 @@ def create_plateforme():
             return jsonify({"error": "Champs requis manquants: nom, client_id, client_secret"}), 400
 
         # Vérifier doublon
-        if PlateformeConfig.query.filter_by(nom=nom).first():
-            return jsonify({"error": f"La plateforme {nom} existe déjà"}), 400
+        existing = PlateformeConfig.query.filter_by(nom=nom).first()
+        if existing:
+            existing.active = True
+            existing.config = config
+            db.session.commit()
+            return jsonify({
+                "message": f"plateforme {nom} réactivée",
+                "id": existing.id
+            }), 200
+        # if PlateformeConfig.query.filter_by(nom=nom).first():
+        #     return jsonify({"error": f"La plateforme {nom} existe déjà"}), 400
 
         plateforme = PlateformeConfig(
             nom=nom,
@@ -189,7 +198,8 @@ def initier_connexion_oauth(plateforme_nom):
 def _construire_url_authorisation(plateforme, state):
     client_id = plateforme.get_client_id()
     scopes = plateforme.get_scopes()
-    redirect_uri = url_for("plateforme_bp.callback_oauth", plateforme_nom=plateforme.nom, _external=True)
+    # CORRECTION : Utilisez le bon nom de blueprint et de fonction
+    redirect_uri = url_for("plateforme_config_bp.route_callback_oauth", plateforme_nom=plateforme.nom, _external=True)
 
     if plateforme.nom == "facebook":
         return (f"https://www.facebook.com/v12.0/dialog/oauth?"
@@ -200,6 +210,7 @@ def _construire_url_authorisation(plateforme, state):
                 f"response_type=code&client_id={client_id}&redirect_uri={redirect_uri}&"
                 f"scope={' '.join(scopes)}&state={state}")
     raise ValueError(f"Plateforme non supportée: {plateforme.nom}")
+
 
 
 def callback_oauth(plateforme_nom):
@@ -251,7 +262,8 @@ def callback_oauth(plateforme_nom):
 
 def _echanger_code_contre_token(plateforme_nom, code, oauth_state):
     plateforme = PlateformeConfig.query.get(oauth_state.plateforme_id)
-    redirect_uri = url_for("plateforme_bp.callback_oauth", plateforme_nom=plateforme_nom, _external=True)
+    # CORRECTION : Utilisez le bon nom de blueprint et de fonction
+    redirect_uri = url_for("plateforme_config_bp.route_callback_oauth", plateforme_nom=plateforme_nom, _external=True)
 
     if plateforme.nom == "facebook":
         response = requests.get("https://graph.facebook.com/v12.0/oauth/access_token", params={

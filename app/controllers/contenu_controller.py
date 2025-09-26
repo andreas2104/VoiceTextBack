@@ -1,5 +1,3 @@
-import os
-import requests
 from flask import request, jsonify
 from app.extensions import db
 from app.models.contenu import Contenu, TypeContenuEnum
@@ -11,6 +9,8 @@ from flask_jwt_extended import get_jwt_identity
 from datetime import datetime
 from gpt4all import GPT4All
 from sqlalchemy.exc import SQLAlchemyError
+import requests
+import os
 
 
 _gpt4all_instance = None

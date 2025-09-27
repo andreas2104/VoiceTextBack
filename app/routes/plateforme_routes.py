@@ -14,17 +14,18 @@ from app.controllers.plateforme_controller import (
 
 plateforme_config_bp = Blueprint("plateforme_config_bp", __name__, url_prefix="/")
 
-# ---------- CRUD plateformes (admin) ----------
 @plateforme_config_bp.route("", methods=["POST"], strict_slashes=False)
 @jwt_required()
 def route_create_plateforme():
     return create_plateforme()
 
 @plateforme_config_bp.route("", methods=["GET"], strict_slashes=False)
+@jwt_required()
 def route_get_plateformes():
     return get_plateformes()
 
 @plateforme_config_bp.route("/<int:plateforme_id>", methods=["GET"])
+@jwt_required()
 def route_get_plateforme_by_id(plateforme_id):
     return get_plateforme_by_id(plateforme_id)
 

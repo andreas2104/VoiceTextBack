@@ -10,7 +10,6 @@ import json
 
 
 def create_plateforme():
-    """Création d’une plateforme (admin uniquement)"""
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
@@ -61,7 +60,10 @@ def create_plateforme():
 
 
 def get_plateformes():
-    """Lister toutes les plateformes actives"""
+    current_user_id = get_jwt_identity() 
+    current_user = Utilisateur.query.get(current_user_id)
+    if not current_user_id:
+        return jsonify({"error": "Authentification requise"}), 401 
     try:
         plateformes = PlateformeConfig.get_active_platforms()
         return jsonify([p.to_dict() for p in plateformes]), 200
@@ -70,7 +72,10 @@ def get_plateformes():
 
 
 def get_plateforme_by_id(plateforme_id):
-    """Récupérer une plateforme par ID"""
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+    if not current_user_id:
+        return jsonify({"error":"Authentification requise"}), 401
     plateforme = PlateformeConfig.query.get(plateforme_id)
     if not plateforme:
         return jsonify({"error": "Plateforme introuvable"}), 404
@@ -79,7 +84,6 @@ def get_plateforme_by_id(plateforme_id):
 
 
 def update_plateforme(plateforme_id):
-    """Mise à jour d’une plateforme (admin uniquement)"""
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
@@ -117,7 +121,6 @@ def update_plateforme(plateforme_id):
 
 
 def delete_plateforme(plateforme_id):
-    """Suppression d’une plateforme (admin uniquement)"""
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
@@ -169,7 +172,7 @@ def deconnexion_plateforme(plateforme_nom):
         return jsonify({"error": str(e)}), 500
     
 
-# oauthplateformecontroller
+# # oauthplateformecontroller
 
 def initier_connexion_oauth(plateforme_nom):
     """Initier le processus OAuth"""

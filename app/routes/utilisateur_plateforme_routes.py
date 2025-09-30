@@ -1,71 +1,64 @@
 from flask import Blueprint
-from flask_jwt_extended import jwt_required
 from app.controllers import utilisateur_plateforme_controller
+from flask_jwt_extended import jwt_required
 
-# CORRECTION 1: Préfixe URL cohérent avec le service frontend
-plateforme_bp = Blueprint("plateforme_bp", __name__, url_prefix="/plateformes")
+utilisateur_plateforme_bp = Blueprint('utilisateur_plateforme_bp', __name__, url_prefix='/api/user-plateformes')
 
-
-@plateforme_bp.route("/", methods=["GET"], strict_slashes=False)
+@utilisateur_plateforme_bp.route("/", methods=['GET'], strict_slashes=False)
 @jwt_required()
-def get_user_plateformes_route():
-    """
-    Récupère la liste des plateformes connectées pour l'utilisateur courant.
-    Route: GET /plateformes/
-    """
+def get_user_plateformes():
+    """Liste toutes les plateformes connectées de l'utilisateur"""
     return utilisateur_plateforme_controller.get_user_plateformes()
 
-
-@plateforme_bp.route("/<int:plateforme_id>", methods=["DELETE"])
+@utilisateur_plateforme_bp.route("/<int:user_plateforme_id>", methods=['GET'], strict_slashes=False)
 @jwt_required()
-def disconnect_plateforme_route(plateforme_id):
-    """
-    Déconnecte une plateforme spécifique de l'utilisateur.
-    Route: DELETE /plateformes/{plateforme_id}
-    CORRECTION 2: Nom de fonction cohérent avec le controller
-    """
-    return utilisateur_plateforme_controller.disconnect_plateforme(plateforme_id=plateforme_id)
+def get_user_plateforme_by_id(user_plateforme_id):
+    """Récupère une connexion plateforme spécifique"""
+    return utilisateur_plateforme_controller.get_user_plateforme_by_id(user_plateforme_id)
 
-
-@plateforme_bp.route("/oauth/<string:plateforme_nom>/login", methods=["GET"])
-@jwt_required() 
-def initier_oauth_route(plateforme_nom):
-    """
-    Démarre le flux OAuth en redirigeant l'utilisateur vers la plateforme externe.
-    Route: GET /plateformes/oauth/{plateforme_nom}/login
-    CORRECTION 3: Nom de fonction cohérent avec le controller
-    """
-    return utilisateur_plateforme_controller.initier_connexion_oauth(plateforme_nom=plateforme_nom)
-
-
-@plateforme_bp.route("/oauth/<string:plateforme_nom>/callback", methods=["GET"])
-def callback_oauth_route(plateforme_nom):
-    """
-    Gère la réponse de la plateforme OAuth après authentification.
-    Route: GET /plateformes/oauth/{plateforme_nom}/callback
-    NOTE: jwt_required n'est pas utilisé ici car la connexion utilisateur est gérée par le 'state' token.
-    CORRECTION 4: Nom de fonction cohérent avec le controller et les url_for()
-    """
-    return utilisateur_plateforme_controller.callback_oauth(plateforme_nom=plateforme_nom)
-
-
-# AJOUT: Route pour obtenir le statut de toutes les plateformes disponibles
-@plateforme_bp.route("/status", methods=["GET"])
+@utilisateur_plateforme_bp.route("/<int:user_plateforme_id>", methods=["DELETE"], strict_slashes=False)
 @jwt_required()
-def get_plateformes_status_route():
-    """
-    Récupère le statut de connexion pour toutes les plateformes disponibles.
-    Route: GET /plateformes/status
-    """
-    return utilisateur_plateforme_controller.get_plateforme_status()
+def disconnect_user_plateforme(user_plateforme_id):
+    """Déconnecte un utilisateur d'une plateforme"""
+    return utilisateur_plateforme_controller.disconnect_user_plateforme(user_plateforme_id)
 
 
-# AJOUT: Route pour rafraîchir un token expiré
-@plateforme_bp.route("/<int:plateforme_id>/refresh", methods=["POST"])
+@utilisateur_plateforme_bp.route("/<int:user_plateforme_id>/meta", methods=["PUT"], strict_slashes=False)
 @jwt_required()
-def refresh_token_route(plateforme_id):
-    """
-    Rafraîchit le token d'accès pour une plateforme spécifique.
-    Route: POST /plateformes/{plateforme_id}/refresh
-    """
-    return utilisateur_plateforme_controller.refresh_plateforme_token(plateforme_id=plateforme_id)
+def update_user_plateforme_meta(user_plateforme_id):
+    """Met à jour les métadonnées d'une connexion plateforme"""
+    return utilisateur_plateforme_controller.update_user_plateforme_meta(user_plateforme_id)
+
+
+@utilisateur_plateforme_bp.route("/<int:user_plateforme_id>/token", methods=["PUT"], strict_slashes=False)
+@jwt_required()
+def refresh_token(user_plateforme_id):
+    """Rafraîchit le token d'accès d'une connexion plateforme"""
+    return utilisateur_plateforme_controller.refresh_token(user_plateforme_id)
+
+
+@utilisateur_plateforme_bp.route("/<int:user_plateforme_id>/check-token", methods=["GET"], strict_slashes=False)
+@jwt_required()
+def check_token_validity(user_plateforme_id):
+    """Vérifie la validité du token d'une connexion plateforme"""
+    return utilisateur_plateforme_controller.check_token_validity(user_plateforme_id)
+
+
+@utilisateur_plateforme_bp.route("/oauth/<string:plateforme_nom>/initiate", methods=["GET"], strict_slashes=False)
+@jwt_required()
+def initiate_oauth(plateforme_nom):
+    """Initialise le flux OAuth pour une plateforme"""
+    return utilisateur_plateforme_controller.initiate_oauth(plateforme_nom)
+
+
+@utilisateur_plateforme_bp.route("/oauth/<string:plateforme_nom>/callback", methods=["GET"], strict_slashes=False)
+def oauth_callback(plateforme_nom):
+    """Gère le callback OAuth (pas de jwt_required car appelé par la plateforme externe)"""
+    return utilisateur_plateforme_controller.oauth_callback(plateforme_nom)
+
+
+@utilisateur_plateforme_bp.route("/admin/cleanup-states", methods=["POST"], strict_slashes=False)
+@jwt_required()
+def cleanup_expired_states():
+    """Nettoie les states OAuth expirés (réservé admin)"""
+    return utilisateur_plateforme_controller.cleanup_expired_states()

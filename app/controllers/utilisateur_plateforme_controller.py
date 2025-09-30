@@ -1,356 +1,406 @@
-# app/controllers/utilisateur_plateforme_controller.py
 from flask import request, jsonify, url_for, redirect
 from app.extensions import db
 from app.models.plateforme import PlateformeConfig, UtilisateurPlateforme, OAuthState
-from flask_jwt_extended import get_jwt_identity, decode_token
+from app.models.utilisateur import Utilisateur
+from flask_jwt_extended import get_jwt_identity
+from datetime import datetime
 import secrets
 import requests
-import json
-from datetime import datetime
-import os
 
-
-# =================================================================
-# FONCTIONS UTILITAIRES INTERNES (OAuth)
-
-
-def _construire_url_authorisation(plateforme, state):
-    """Construit l'URL de redirection vers le fournisseur OAuth."""
-    client_id = plateforme.get_client_id()
-    scopes = plateforme.get_scopes()
-    
-    # CORRECTION 1: Utiliser le bon nom de blueprint
-    redirect_uri = url_for("plateforme_bp.callback_oauth_route", plateforme_nom=plateforme.nom, _external=True)
-
-    if plateforme.nom == "facebook":
-        return (f"https://www.facebook.com/v12.0/dialog/oauth?"
-                f"client_id={client_id}&redirect_uri={redirect_uri}&"
-                f"scope={','.join(scopes)}&state={state}")
-    elif plateforme.nom == "linkedin":
-        return (f"https://www.linkedin.com/oauth/v2/authorization?"
-                f"response_type=code&client_id={client_id}&redirect_uri={redirect_uri}&"
-                f"scope={' '.join(scopes)}&state={state}")
-    elif plateforme.nom == "google":
-        return (f"https://accounts.google.com/o/oauth2/auth?"
-                f"client_id={client_id}&redirect_uri={redirect_uri}&"
-                f"scope={' '.join(scopes)}&response_type=code&state={state}")
-    
-    raise ValueError(f"Plateforme non supportée: {plateforme.nom}")
-
-
-def _echanger_code_contre_token(plateforme_nom, code, oauth_state):
-    """Échange le code d'autorisation contre un jeton d'accès."""
-    plateforme = PlateformeConfig.query.get(oauth_state.plateforme_id)
-    redirect_uri = url_for("plateforme_bp.callback_oauth_route", plateforme_nom=plateforme_nom, _external=True)
-
-    try:
-        if plateforme.nom == "facebook":
-            response = requests.get("https://graph.facebook.com/v12.0/oauth/access_token", params={
-                "client_id": plateforme.get_client_id(),
-                "client_secret": plateforme.get_client_secret(),
-                "redirect_uri": redirect_uri,
-                "code": code
-            }, timeout=30)
-        elif plateforme.nom == "linkedin":
-            response = requests.post("https://www.linkedin.com/oauth/v2/accessToken", data={
-                "client_id": plateforme.get_client_id(),
-                "client_secret": plateforme.get_client_secret(),
-                "redirect_uri": redirect_uri,
-                "code": code,
-                "grant_type": "authorization_code"
-            }, timeout=30)
-        elif plateforme.nom == "google":
-            response = requests.post("https://oauth2.googleapis.com/token", data={
-                "client_id": plateforme.get_client_id(),
-                "client_secret": plateforme.get_client_secret(),
-                "redirect_uri": redirect_uri,
-                "code": code,
-                "grant_type": "authorization_code"
-            }, timeout=30)
-        else:
-            raise ValueError(f"Plateforme non supportée: {plateforme_nom}")
-        
-        # CORRECTION 2: Meilleure gestion des erreurs
-        if response.status_code == 200:
-            return response.json()
-        else:
-            print(f"Erreur lors de l'échange de token: {response.status_code} - {response.text}")
-            return None
-            
-    except requests.RequestException as e:
-        print(f"Erreur de requête lors de l'échange de token: {e}")
-        return None
-
-
-def _recuperer_infos_profil(plateforme_nom, access_token):
-    """Récupère les informations de profil de l'utilisateur sur la plateforme externe."""
-    try:
-        if plateforme_nom == "facebook":
-            response = requests.get(
-                "https://graph.facebook.com/me",
-                params={"access_token": access_token, "fields": "id,name,email"},
-                timeout=30
-            )
-        elif plateforme_nom == "linkedin":
-            response = requests.get(
-                "https://api.linkedin.com/v2/me",
-                headers={"Authorization": f"Bearer {access_token}"},
-                timeout=30
-            )
-        elif plateforme_nom == "google":
-            response = requests.get(
-                "https://www.googleapis.com/oauth2/v2/userinfo",
-                headers={"Authorization": f"Bearer {access_token}"},
-                timeout=30
-            )
-        else:
-            return None
-            
-        return response.json() if response.status_code == 200 else None
-        
-    except requests.RequestException as e:
-        print(f"Erreur lors de la récupération du profil: {e}")
-        return None
-
-
-# =================================================================
-# FONCTIONS PUBLIQUES DU CONTRÔLEUR
 
 def get_user_plateformes():
-    """CORRECTION 3: Renommage pour cohérence avec les routes"""
-    utilisateur_id = get_jwt_identity()
-    if not utilisateur_id:
-        return jsonify({"error": "Non authentifié"}), 401
+    """Récupère toutes les plateformes connectées de l'utilisateur actuel"""
+    current_user_id = get_jwt_identity()
+    if not current_user_id:
+        return jsonify({"error": "Authentification requise"}), 401
 
     try:
-        connexions = UtilisateurPlateforme.query.filter_by(utilisateur_id=utilisateur_id).all()
-        return jsonify([c.to_dict() for c in connexions]), 200
+        user_plateformes = UtilisateurPlateforme.query.filter_by(
+            utilisateur_id=current_user_id
+        ).all()
+        
+        return jsonify([up.to_dict() for up in user_plateformes]), 200
     except Exception as e:
-        print(f"Erreur lors de la récupération des plateformes: {e}")
-        return jsonify({"error": "Erreur interne du serveur"}), 500
+        return jsonify({"error": str(e)}), 500
 
 
-def disconnect_plateforme(plateforme_id):
-    """CORRECTION 4: Utiliser l'ID au lieu du nom pour la déconnexion"""
-    utilisateur_id = get_jwt_identity()
-    if not utilisateur_id:
-        return jsonify({"error": "Non authentifié"}), 401
+def get_user_plateforme_by_id(user_plateforme_id):
+    """Récupère une connexion plateforme spécifique"""
+    current_user_id = get_jwt_identity()
+    if not current_user_id:
+        return jsonify({"error": "Authentification requise"}), 401
 
     try:
-        # Utiliser l'ID de plateforme directement
-        connexion = UtilisateurPlateforme.query.filter_by(
-            utilisateur_id=utilisateur_id,
-            plateforme_id=plateforme_id
+        user_plateforme = UtilisateurPlateforme.query.filter_by(
+            id=user_plateforme_id,
+            utilisateur_id=current_user_id
         ).first()
+
+        if not user_plateforme:
+            return jsonify({"error": "Connexion plateforme introuvable"}), 404
+
+        return jsonify(user_plateforme.to_dict()), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+def disconnect_user_plateforme(user_plateforme_id):
+    """Déconnecte un utilisateur d'une plateforme"""
+    current_user_id = get_jwt_identity()
+    if not current_user_id:
+        return jsonify({"error": "Authentification requise"}), 401
+
+    try:
+        user_plateforme = UtilisateurPlateforme.query.filter_by(
+            id=user_plateforme_id,
+            utilisateur_id=current_user_id
+        ).first()
+
+        if not user_plateforme:
+            return jsonify({"error": "Connexion plateforme introuvable"}), 404
+
+        plateforme_nom = user_plateforme.plateforme.nom if user_plateforme.plateforme else "inconnue"
         
-        if not connexion:
-            return jsonify({"error": "Connexion non trouvée"}), 404
-            
-        db.session.delete(connexion)
+        db.session.delete(user_plateforme)
         db.session.commit()
-        return jsonify({"message": "Déconnexion réussie"}), 200
-        
+
+        return jsonify({
+            "message": f"Déconnecté de {plateforme_nom} avec succès"
+        }), 200
     except Exception as e:
         db.session.rollback()
-        print(f"Erreur lors de la déconnexion: {e}")
-        return jsonify({"error": "Erreur interne du serveur"}), 500
+        return jsonify({"error": str(e)}), 500
 
 
-def initier_connexion_oauth(plateforme_nom):
-    """CORRECTION 5: Retourner une redirection HTTP au lieu de JSON"""
-    utilisateur_id = get_jwt_identity()
-    if not utilisateur_id:
-        return jsonify({"error": "Utilisateur non authentifié"}), 401
-
-    # Récupérer la plateforme active par son nom
-    plateforme = PlateformeConfig.get_platform_by_name(plateforme_nom) 
-    if not plateforme:
-        return jsonify({"error": f"Plateforme {plateforme_nom} non trouvée"}), 404
-
-    if not plateforme.is_active:
-        return jsonify({"error": f"Plateforme {plateforme_nom} désactivée"}), 400
+def update_user_plateforme_meta(user_plateforme_id):
+    """Met à jour les métadonnées d'une connexion plateforme"""
+    current_user_id = get_jwt_identity()
+    if not current_user_id:
+        return jsonify({"error": "Authentification requise"}), 401
 
     try:
-        # Vérifier si l'utilisateur est déjà connecté à cette plateforme
-        connexion_existante = UtilisateurPlateforme.query.filter_by(
-            utilisateur_id=utilisateur_id,
-            plateforme_id=plateforme.id
-        ).first()
-        
-        if connexion_existante and connexion_existante.is_token_valid():
-            return jsonify({"message": "Déjà connecté à cette plateforme"}), 200
+        data = request.get_json()
+        if not data or 'meta' not in data:
+            return jsonify({"error": "Champ 'meta' requis"}), 400
 
-        # Générer un état OAuth sécurisé
+        user_plateforme = UtilisateurPlateforme.query.filter_by(
+            id=user_plateforme_id,
+            utilisateur_id=current_user_id
+        ).first()
+
+        if not user_plateforme:
+            return jsonify({"error": "Connexion plateforme introuvable"}), 404
+
+        user_plateforme.meta.update(data['meta'])
+        user_plateforme.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+
+        return jsonify({
+            "message": "Métadonnées mises à jour avec succès",
+            "data": user_plateforme.to_dict()
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+
+def initiate_oauth(plateforme_nom):
+    """Initialise le flux OAuth pour une plateforme"""
+    current_user_id = get_jwt_identity()
+    if not current_user_id:
+        return jsonify({"error": "Authentification requise"}), 401
+
+    try:
+        # Récupérer la configuration de la plateforme
+        plateforme = PlateformeConfig.get_platform_by_name(plateforme_nom)
+        if not plateforme:
+            return jsonify({"error": f"Plateforme {plateforme_nom} introuvable ou inactive"}), 404
+
+        # Générer un state unique
         state = secrets.token_urlsafe(32)
+
+        # Créer l'enregistrement OAuth state
         oauth_state = OAuthState(
-            state=state, 
-            utilisateur_id=utilisateur_id, 
+            state=state,
+            utilisateur_id=current_user_id,
             plateforme_id=plateforme.id
         )
         db.session.add(oauth_state)
         db.session.commit()
 
-        auth_url = _construire_url_authorisation(plateforme, state)
+        # Construire l'URL d'autorisation
+        client_id = plateforme.get_client_id()
+        scopes = plateforme.get_scopes()
+        redirect_uri = url_for('oauth_callback', plateforme_nom=plateforme_nom, _external=True)
         
-        # CORRECTION MAJEURE: Rediriger directement vers le fournisseur OAuth
-        return redirect(auth_url)
-        
+        # URL d'autorisation (à adapter selon la plateforme)
+        auth_url = plateforme.config.get('auth_url')
+        if not auth_url:
+            return jsonify({"error": "URL d'autorisation non configurée"}), 500
+
+        auth_params = {
+            'client_id': client_id,
+            'redirect_uri': redirect_uri,
+            'state': state,
+            'response_type': 'code',
+            'scope': ' '.join(scopes) if scopes else ''
+        }
+
+        # Construire l'URL complète
+        from urllib.parse import urlencode
+        full_auth_url = f"{auth_url}?{urlencode(auth_params)}"
+
+        return jsonify({
+            "auth_url": full_auth_url,
+            "state": state
+        }), 200
+
     except Exception as e:
         db.session.rollback()
-        print(f"Erreur lors de l'initiation OAuth: {e}")
-        return jsonify({"error": "Erreur interne du serveur"}), 500
+        return jsonify({"error": str(e)}), 500
 
 
-def callback_oauth(plateforme_nom):
-    """CORRECTION 6: Rediriger vers le frontend avec des paramètres appropriés"""
-    code = request.args.get("code")
-    state = request.args.get("state")
-    error = request.args.get("error")
-
-    # URL du frontend - à configurer selon votre environnement
-    frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
-    dashboard_url = f"{frontend_url}/dashboard"
-
-    if error:
-        error_message = request.args.get("error_description", error)
-        return redirect(f"{dashboard_url}?oauth_error={error}&error_description={error_message}")
-
-    if not code or not state:
-        return redirect(f"{dashboard_url}?oauth_error=missing_parameters")
-
-    oauth_state = OAuthState.query.filter_by(state=state).first()
-    if not oauth_state:
-        return redirect(f"{dashboard_url}?oauth_error=invalid_state")
-        
-    if not oauth_state.is_valid():
-        return redirect(f"{dashboard_url}?oauth_error=expired_state")
-
+def oauth_callback(plateforme_nom):
+    """Gère le callback OAuth"""
     try:
-        # Marquer l'état comme utilisé
+        # Récupérer les paramètres
+        code = request.args.get('code')
+        state = request.args.get('state')
+        error = request.args.get('error')
+
+        if error:
+            return jsonify({
+                "error": f"Erreur OAuth: {error}",
+                "description": request.args.get('error_description', '')
+            }), 400
+
+        if not code or not state:
+            return jsonify({"error": "Paramètres manquants"}), 400
+
+        # Vérifier le state
+        oauth_state = OAuthState.query.filter_by(state=state).first()
+        if not oauth_state or not oauth_state.is_valid():
+            return jsonify({"error": "State invalide ou expiré"}), 400
+
+        if oauth_state.used:
+            return jsonify({"error": "State déjà utilisé"}), 400
+
+        # Marquer le state comme utilisé
         oauth_state.mark_as_used()
         db.session.commit()
 
+        # Récupérer la plateforme
+        plateforme = PlateformeConfig.query.get(oauth_state.plateforme_id)
+        if not plateforme or plateforme.nom != plateforme_nom:
+            return jsonify({"error": "Plateforme invalide"}), 400
+
         # Échanger le code contre un token
-        token_data = _echanger_code_contre_token(plateforme_nom, code, oauth_state)
-        if not token_data or "access_token" not in token_data:
-            return redirect(f"{dashboard_url}?oauth_error=token_exchange_failed")
+        token_url = plateforme.config.get('token_url')
+        if not token_url:
+            return jsonify({"error": "URL de token non configurée"}), 500
 
-        # Chercher ou créer la connexion utilisateur
-        connexion = UtilisateurPlateforme.query.filter_by(
-            utilisateur_id=oauth_state.utilisateur_id,
-            plateforme_id=oauth_state.plateforme_id
-        ).first()
+        redirect_uri = url_for('oauth_callback', plateforme_nom=plateforme_nom, _external=True)
         
-        if not connexion:
-            connexion = UtilisateurPlateforme(
-                utilisateur_id=oauth_state.utilisateur_id,
-                plateforme_id=oauth_state.plateforme_id
-            )
-            db.session.add(connexion)
+        token_data = {
+            'client_id': plateforme.get_client_id(),
+            'client_secret': plateforme.get_client_secret(),
+            'code': code,
+            'redirect_uri': redirect_uri,
+            'grant_type': 'authorization_code'
+        }
 
-        # Mettre à jour le token
-        connexion.update_token(
-            access_token=token_data["access_token"],
-            expires_in=token_data.get("expires_in"),
-            refresh_token=token_data.get("refresh_token")  # Si disponible
+        token_response = requests.post(token_url, data=token_data)
+        
+        if token_response.status_code != 200:
+            return jsonify({
+                "error": "Échec de l'échange de token",
+                "details": token_response.text
+            }), 500
+
+        token_json = token_response.json()
+        access_token = token_json.get('access_token')
+        expires_in = token_json.get('expires_in')
+        refresh_token = token_json.get('refresh_token')
+
+        if not access_token:
+            return jsonify({"error": "Token d'accès non reçu"}), 500
+
+        # Récupérer les informations de l'utilisateur depuis la plateforme
+        user_info_url = plateforme.config.get('user_info_url')
+        external_id = None
+        
+        if user_info_url:
+            headers = {'Authorization': f'Bearer {access_token}'}
+            user_info_response = requests.get(user_info_url, headers=headers)
+            
+            if user_info_response.status_code == 200:
+                user_info = user_info_response.json()
+                external_id = user_info.get('id') or user_info.get('sub')
+
+        # Créer ou mettre à jour la connexion utilisateur-plateforme
+        user_plateforme = UtilisateurPlateforme.get_user_platform(
+            oauth_state.utilisateur_id,
+            plateforme_nom
         )
 
-        # Récupérer les informations de profil
-        profil_data = _recuperer_infos_profil(plateforme_nom, token_data["access_token"])
-        if profil_data:
-            connexion.meta = profil_data
-            connexion.external_id = profil_data.get("id")
-            
-        # Activer la connexion
-        connexion.is_active = True
+        if user_plateforme:
+            # Mettre à jour le token existant
+            user_plateforme.update_token(access_token, expires_in=expires_in)
+            if external_id:
+                user_plateforme.external_id = external_id
+            if refresh_token:
+                user_plateforme.meta['refresh_token'] = refresh_token
+        else:
+            # Créer une nouvelle connexion
+            user_plateforme = UtilisateurPlateforme(
+                utilisateur_id=oauth_state.utilisateur_id,
+                plateforme_id=plateforme.id,
+                external_id=external_id,
+                access_token=access_token,
+                meta={'refresh_token': refresh_token} if refresh_token else {}
+            )
+            user_plateforme.update_token(access_token, expires_in=expires_in)
+            db.session.add(user_plateforme)
 
         db.session.commit()
-        
-        # CORRECTION MAJEURE: Redirection vers le frontend avec succès
-        return redirect(f"{dashboard_url}?oauth_success={plateforme_nom}")
+
+        return jsonify({
+            "message": f"Connexion à {plateforme_nom} réussie",
+            "data": user_plateforme.to_dict()
+        }), 200
 
     except Exception as e:
         db.session.rollback()
-        print(f"Erreur lors du callback OAuth: {e}")
-        return redirect(f"{dashboard_url}?oauth_error=server_error")
+        return jsonify({"error": str(e)}), 500
 
 
-# =================================================================
-# FONCTIONS UTILITAIRES SUPPLÉMENTAIRES
-# =================================================================
+def refresh_token(user_plateforme_id):
+    """Rafraîchit le token d'accès d'une connexion plateforme"""
+    current_user_id = get_jwt_identity()
+    if not current_user_id:
+        return jsonify({"error": "Authentification requise"}), 401
 
-def refresh_token_if_needed(connexion):
-    """Fonction utilitaire pour rafraîchir le token si nécessaire"""
-    if not connexion.is_token_valid() and connexion.refresh_token:
-        # Implémenter la logique de rafraîchissement selon la plateforme
-        pass
-    
-def get_plateforme_status_util(utilisateur_id):
-    """Obtenir le statut de toutes les plateformes pour un utilisateur"""
-    plateformes_config = PlateformeConfig.query.filter_by(is_active=True).all()
-    connexions = UtilisateurPlateforme.query.filter_by(utilisateur_id=utilisateur_id).all()
-    
-    connexions_dict = {c.plateforme_id: c for c in connexions}
-    
-    result = []
-    for plateforme in plateformes_config:
-        connexion = connexions_dict.get(plateforme.id)
-        result.append({
-            'plateforme_id': plateforme.id,
-            'plateforme_nom': plateforme.nom,
-            'is_connected': connexion is not None,
-            'is_active': connexion.is_active if connexion else False,
-            'token_valid': connexion.is_token_valid() if connexion else False
-        })
-    
-    return result
-
-
-def get_plateforme_status():
-    """Obtenir le statut de toutes les plateformes pour l'utilisateur connecté"""
-    utilisateur_id = get_jwt_identity()
-    if not utilisateur_id:
-        return jsonify({"error": "Non authentifié"}), 401
-    
     try:
-        status = get_plateforme_status_util(utilisateur_id)  # Fonction utilitaire déjà définie
-        return jsonify(status), 200
-    except Exception as e:
-        print(f"Erreur lors de la récupération du statut: {e}")
-        return jsonify({"error": "Erreur interne du serveur"}), 500
-
-
-def refresh_plateforme_token(plateforme_id):
-    """Rafraîchir le token d'une plateforme spécifique"""
-    utilisateur_id = get_jwt_identity()
-    if not utilisateur_id:
-        return jsonify({"error": "Non authentifié"}), 401
-    
-    try:
-        connexion = UtilisateurPlateforme.query.filter_by(
-            utilisateur_id=utilisateur_id,
-            plateforme_id=plateforme_id
+        user_plateforme = UtilisateurPlateforme.query.filter_by(
+            id=user_plateforme_id,
+            utilisateur_id=current_user_id
         ).first()
+
+        if not user_plateforme:
+            return jsonify({"error": "Connexion plateforme introuvable"}), 404
+
+        refresh_token = user_plateforme.meta.get('refresh_token')
+        if not refresh_token:
+            return jsonify({"error": "Aucun refresh token disponible"}), 400
+
+        plateforme = user_plateforme.plateforme
+        token_url = plateforme.config.get('token_url')
         
-        if not connexion:
-            return jsonify({"error": "Connexion non trouvée"}), 404
-            
-        if not connexion.refresh_token:
-            return jsonify({"error": "Token de rafraîchissement non disponible"}), 400
+        if not token_url:
+            return jsonify({"error": "URL de token non configurée"}), 500
+
+        token_data = {
+            'client_id': plateforme.get_client_id(),
+            'client_secret': plateforme.get_client_secret(),
+            'refresh_token': refresh_token,
+            'grant_type': 'refresh_token'
+        }
+
+        token_response = requests.post(token_url, data=token_data)
         
-        # Tentative de rafraîchissement
-        success = refresh_token_if_needed(connexion)
-        
-        if success:
-            db.session.commit()
+        if token_response.status_code != 200:
             return jsonify({
-                "message": "Token rafraîchi avec succès",
-                "data": connexion.to_dict()
-            }), 200
-        else:
-            return jsonify({"error": "Échec du rafraîchissement"}), 400
-            
+                "error": "Échec du rafraîchissement du token",
+                "details": token_response.text
+            }), 500
+
+        token_json = token_response.json()
+        new_access_token = token_json.get('access_token')
+        expires_in = token_json.get('expires_in')
+        new_refresh_token = token_json.get('refresh_token')
+
+        if not new_access_token:
+            return jsonify({"error": "Nouveau token d'accès non reçu"}), 500
+
+        # Mettre à jour le token
+        user_plateforme.update_token(new_access_token, expires_in=expires_in)
+        if new_refresh_token:
+            user_plateforme.meta['refresh_token'] = new_refresh_token
+
+        db.session.commit()
+
+        return jsonify({
+            "message": "Token rafraîchi avec succès",
+            "data": user_plateforme.to_dict()
+        }), 200
+
     except Exception as e:
         db.session.rollback()
-        print(f"Erreur lors du rafraîchissement: {e}")
-        return jsonify({"error": "Erreur interne du serveur"}), 500
+        return jsonify({"error": str(e)}), 500
+
+
+def check_token_validity(user_plateforme_id):
+    """Vérifie la validité du token d'une connexion plateforme"""
+    current_user_id = get_jwt_identity()
+    if not current_user_id:
+        return jsonify({"error": "Authentification requise"}), 401
+
+    try:
+        user_plateforme = UtilisateurPlateforme.query.filter_by(
+            id=user_plateforme_id,
+            utilisateur_id=current_user_id
+        ).first()
+
+        if not user_plateforme:
+            return jsonify({"error": "Connexion plateforme introuvable"}), 404
+
+        is_valid = user_plateforme.is_token_valid()
+
+        return jsonify({
+            "valid": is_valid,
+            "expires_at": user_plateforme.token_expires_at.isoformat() if user_plateforme.token_expires_at else None,
+            "plateforme": user_plateforme.plateforme.nom if user_plateforme.plateforme else None
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+
+def cleanup_expired_states():
+    """Nettoie les states OAuth expirés (fonction admin)"""
+    current_user_id = get_jwt_identity()
+    if not current_user_id:
+        return jsonify({"error": "Authentification requise"}), 401
+
+    current_user = Utilisateur.query.get(current_user_id)
+    if not current_user or current_user.type_compte.value != 'admin':
+        return jsonify({"error": "Accès admin requis"}), 403
+
+    try:
+        # Supprimer les states expirés ou utilisés de plus de 24h
+        from datetime import timedelta
+        cutoff_time = datetime.utcnow() - timedelta(hours=24)
+        
+        expired_states = OAuthState.query.filter(
+            (OAuthState.used == True) | (OAuthState.created_at < cutoff_time)
+        ).all()
+
+        count = len(expired_states)
+        
+        for state in expired_states:
+            db.session.delete(state)
+        
+        db.session.commit()
+
+        return jsonify({
+            "message": f"{count} states OAuth nettoyés",
+            "count": count
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500

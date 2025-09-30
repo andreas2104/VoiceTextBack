@@ -11,7 +11,7 @@ from app.routes.contenu_routes import contenu_bp
 from app.routes.oaut_routes import oauth_bp
 from app.routes.auth_routes import auth_bp
 from app.routes.plateforme_routes import plateforme_config_bp
-from app.routes.utilisateur_plateforme_routes import plateforme_bp
+from app.routes.utilisateur_plateforme_routes import utilisateur_plateforme_bp
 from app.routes.historique_routes import historique_bp  
 from app.routes.publication_routes import publication_bp
 from dotenv import load_dotenv
@@ -67,7 +67,7 @@ def create_app():
         (prompt_bp, '/api/prompts'),
         (contenu_bp, "/api/contenu"),
         (plateforme_config_bp, "/api/adminplateformes"),  
-        (plateforme_bp, "/api/plateformes"),    
+        (utilisateur_plateforme_bp, "/api/plateformes"),    
         (historique_bp, "/api/historiques"),       
         (publication_bp, "/api/publications"),
         (oauth_bp, "/api/oauth"),

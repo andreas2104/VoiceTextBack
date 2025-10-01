@@ -18,12 +18,23 @@ _gpt4all_instance = None
 def get_gpt4all_instance():
     global _gpt4all_instance
     if _gpt4all_instance is None:
-        model_path = os.path.expanduser("~/.cache/gpt4all/orca-mini-3b-gguf2-q4_0.gguf")
+        model_path = os.path.expanduser("~/.cache/gpt4all/")
+        
+        # Vérifier si le modèle existe déjà localement
+        model_file = "orca-mini-3b-gguf2-q4_0.gguf"
+        full_path = os.path.join(model_path, model_file)
+        
+        if not os.path.exists(full_path):
+            return {"type": "error", "content": f"Modèle GPT4All non trouvé à {full_path}"}
+        
+        # Charger le modèle en mode local uniquement (sans connexion internet)
         _gpt4all_instance = GPT4All(
-            "orca-mini-3b-gguf2-q4_0.gguf",
-            model_path=os.path.dirname(model_path)
+            model_name=model_file,
+            model_path=model_path,
+            allow_download=False,  # IMPORTANT: empêche le téléchargement
+            device='cpu'  # ou 'gpu' si vous avez CUDA
         )
-        print(f"Modèle GPT4All chargé : {model_path}")
+        print(f"✅ Modèle GPT4All chargé : {full_path}")
     return _gpt4all_instance
 
 

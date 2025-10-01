@@ -369,7 +369,6 @@ def check_token_validity(user_plateforme_id):
 
 
 
-
 def cleanup_expired_states():
     """Nettoie les states OAuth expirés (fonction admin)"""
     current_user_id = get_jwt_identity()

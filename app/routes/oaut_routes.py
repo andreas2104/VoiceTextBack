@@ -159,7 +159,7 @@ def google_callback():
             "name": user_info.get("name", ""),
             "prenom": utilisateur.prenom,
             "nom": utilisateur.nom,
-            "picture": utilisateur.photo, # Ajout de la photo au token
+            "picture": utilisateur.photo, 
             "type_compte": utilisateur.type_compte.value,
             "iat": datetime.datetime.utcnow(),
             "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=24),
@@ -252,7 +252,7 @@ def google_callback_api():
                 email=email,
                 nom=nom,
                 prenom=prenom,
-                photo=user_info.get("picture"), # Ajout de la photo ici
+                photo=user_info.get("picture"), 
                 type_compte=TypeCompteEnum.admin if is_admin else TypeCompteEnum.user,
                 mot_de_passe=None
             )
@@ -273,7 +273,7 @@ def google_callback_api():
             "name": user_info.get("name", ""),
             "prenom": utilisateur.prenom,
             "nom": utilisateur.nom,
-            "picture": utilisateur.photo, # Ajout de la photo au token
+            "picture": utilisateur.photo, 
             "type_compte": utilisateur.type_compte.value,
             "iat": datetime.datetime.utcnow(),
             "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=24),
@@ -293,7 +293,7 @@ def google_callback_api():
                 "name": user_info.get("name", ""),
                 "prenom": utilisateur.prenom,
                 "nom": utilisateur.nom,
-                "picture": utilisateur.photo, # Ajout de la photo à la réponse JSON
+                "picture": utilisateur.photo, 
                 "type_compte": utilisateur.type_compte.value
             }
         }), 200
@@ -302,10 +302,8 @@ def google_callback_api():
         current_app.logger.error(f"Erreur API OAuth: {str(e)}")
         return jsonify({"error": "Unexpected error during OAuth"}), 500
 
-# Endpoint utile pour debug
 @oauth_bp.route('/config', methods=['GET'])
 def oauth_config():
-    """Endpoint de debug pour vérifier la configuration OAuth"""
     return jsonify({
         "google_client_configured": bool(GOOGLE_CLIENT_ID),
         "redirect_uri": GOOGLE_REDIRECT_URI,
@@ -316,4 +314,3 @@ def oauth_config():
 
 
 
-# from app.controllers.oaut_controller import OAuthController

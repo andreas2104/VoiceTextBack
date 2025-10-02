@@ -11,18 +11,15 @@ projet_bp = Blueprint("projet_bp", __name__, url_prefix="/")
 def get_all_projet():
     return projet_controller.get_all_projet()
 
-
 @projet_bp.route("/", methods=["POST"], strict_slashes=False)
 @jwt_required()
 def create_projet():
     return projet_controller.create_projet()
 
-
 @projet_bp.route("/<int:projet_id>", methods=["GET"])
 @jwt_required()
 def get_projet_by_id(projet_id):
     return projet_controller.get_projet_by_id(projet_id=projet_id)
-
 
 @projet_bp.route("/<int:projet_id>", methods=["PUT"])
 @jwt_required()

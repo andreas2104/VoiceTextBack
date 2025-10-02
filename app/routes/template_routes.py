@@ -2,7 +2,6 @@ from flask import Blueprint
 from app.controllers import template_controller
 from flask_jwt_extended import jwt_required
 
-# IMPORTANT: Ajouter strict_slashes=False
 template_bp = Blueprint('template_bp', __name__, url_prefix="")
 
 @template_bp.route("/", methods=['GET'], strict_slashes=False)

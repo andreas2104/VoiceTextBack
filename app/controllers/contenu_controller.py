@@ -140,7 +140,6 @@ def call_model_api(model: ModelIA, prompt_text: str, temperature: float, max_tok
 
 
 def generer_contenu():
-    """Génère du contenu avec IA"""
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
@@ -161,25 +160,20 @@ def generer_contenu():
         if not prompt or not model:
             return jsonify({"error": "Prompt ou modèle introuvable"}), 404
 
-        # Construction du prompt
         prompt_text = prompt.texte_prompt
         if template:
             prompt_text = template.structure.replace("{{prompt}}", prompt_text)
 
-        # Paramètres de génération
         temperature = (prompt.parametres or {}).get("temperature") or model.parametres_default.get("temperature", 0.7)
         max_tokens = (prompt.parametres or {}).get("max_tokens") or model.parametres_default.get("max_tokens", 512)
 
-        # Détection du type de contenu
         type_contenu = detect_content_type(model, prompt_text)
 
-        # Appel à l'IA
         resultat = call_model_api(model, prompt_text, temperature, max_tokens)
 
         if resultat["type"] == "error":
             return jsonify({"error": resultat["content"]}), 500
 
-        # Sauvegarde en base
         contenu = Contenu(
             id_utilisateur=current_user.id,
             id_prompt=data["id_prompt"],
@@ -208,7 +202,6 @@ def generer_contenu():
 
 
 def get_all_contenus():
-    """Récupère tous les contenus (admin) ou ceux de l'utilisateur"""
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
@@ -249,7 +242,6 @@ def get_contenu_by_id(contenu_id):
     if not contenu:
         return jsonify({"error": "Contenu introuvable"}), 404
         
-    # Vérification des permissions
     if contenu.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
         return jsonify({"error": "Non autorisé"}), 403
 
@@ -269,7 +261,6 @@ def get_contenu_by_id(contenu_id):
 
 
 def update_contenu(contenu_id):
-    """Met à jour un contenu"""
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
     
@@ -304,7 +295,6 @@ def update_contenu(contenu_id):
 
 
 def delete_contenu(contenu_id):
-    """Supprime un contenu"""
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
@@ -315,7 +305,6 @@ def delete_contenu(contenu_id):
     if not contenu:
         return jsonify({"error": "Contenu introuvable"}), 404
         
-    # Vérification des permissions
     if contenu.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
         return jsonify({"error": "Non autorisé"}), 403
     

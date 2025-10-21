@@ -6,7 +6,9 @@ from app.models.contenu import Contenu
 from app.models.plateforme import PlateformeConfig # Ligne corrigée ici
 from flask_jwt_extended import get_jwt_identity
 from sqlalchemy.exc import SQLAlchemyError
-from datetime import datetime
+from sqlalchemy import func
+from datetime import datetime, timedelta
+
 
 def get_all_publications():
     """Récupère toutes les publications selon les permissions"""
@@ -163,3 +165,72 @@ def delete_publication(publication_id):
     except SQLAlchemyError as e:
         db.session.rollback()
         return jsonify({"error": f"Erreur de base de données: {str(e)}"}), 500
+
+
+# statistique
+def get_publication_stats():
+    """Récupère les statistiques simples des publications"""
+    current_user_id = get_jwt_identity()
+    current_user = Utilisateur.query.get(current_user_id)
+
+    if not current_user:
+        return jsonify({"error": "Utilisateur non trouvé"}), 404
+
+    # Base query selon les permissions
+    if current_user.type_compte == TypeCompteEnum.admin:
+        base_query = Publication.query
+    else:
+        base_query = Publication.query.filter_by(id_utilisateur=current_user_id)
+
+    # Statistiques de base
+    total_publications = base_query.count()
+    
+    # Publications par statut
+    stats_par_statut = {}
+    for statut in StatutPublicationEnum:
+        count = base_query.filter_by(statut=statut).count()
+        stats_par_statut[statut.value] = count
+
+    # Publications cette semaine
+    debut_semaine = datetime.now() - timedelta(days=7)
+    publications_semaine = base_query.filter(
+        Publication.date_creation >= debut_semaine
+    ).count()
+
+    # Publications programmées à venir
+    publications_programmees = base_query.filter(
+        Publication.statut == StatutPublicationEnum.programme,
+        Publication.date_programmee >= datetime.now()
+    ).count()
+
+    # Dernières publications (5 plus récentes)
+    dernieres_publications = base_query.order_by(
+        Publication.date_creation.desc()
+    ).limit(5).all()
+
+    # Plateforme la plus utilisée
+    plateforme_populaire = db.session.query(
+        Publication.id_plateforme,
+        func.count(Publication.id).label('count')
+    ).group_by(Publication.id_plateforme).order_by(
+        func.count(Publication.id).desc()
+    ).first()
+
+    # Statistiques résumées
+    stats = {
+        "total": total_publications,
+        "par_statut": stats_par_statut,
+        "cette_semaine": publications_semaine,
+        "a_venir": publications_programmees,
+        "dernieres_publications": [
+            {
+                "id": pub.id,
+                "titre": pub.titre_publication,
+                "statut": pub.statut.value,
+                "date_creation": pub.date_creation.isoformat()
+            } for pub in dernieres_publications
+        ],
+        "plateforme_populaire": plateforme_populaire[0] if plateforme_populaire else None
+    }
+
+    return jsonify(stats), 200

@@ -103,7 +103,7 @@ def update_user_plateforme_meta(user_plateforme_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
-
+    
 def initiate_oauth(plateforme_nom):
     """Initialise le flux OAuth pour une plateforme"""
     current_user_id = get_jwt_identity()
@@ -111,8 +111,11 @@ def initiate_oauth(plateforme_nom):
         return jsonify({"error": "Authentification requise"}), 401
 
     try:
+        import os
+        
         print(f"🔍 [DEBUG] Début initiate_oauth - Plateforme: {plateforme_nom}")
         print(f"🔍 [DEBUG] User ID: {current_user_id}")
+        print(f"🔍 [DEBUG ENV] PUBLIC_URL = {os.getenv('PUBLIC_URL')}")
         
         plateforme = PlateformeConfig.get_platform_by_name(plateforme_nom)
         if not plateforme:
@@ -121,18 +124,14 @@ def initiate_oauth(plateforme_nom):
 
         print(f"✅ [DEBUG] Plateforme trouvée: {plateforme.nom} (ID: {plateforme.id})")
         print(f"📋 [DEBUG] Config: {plateforme.config}")
-        print(f"🔍 [DEBUG] Plateforme active: {plateforme.active}")
         
         if not plateforme.config.get('auth_url'):
             print(f"❌ [DEBUG] auth_url manquante pour {plateforme_nom}")
-            print(f"📋 [DEBUG] Configuration disponible: {list(plateforme.config.keys())}")
             return jsonify({"error": "URL d'autorisation non configurée"}), 500
             
         if not plateforme.get_client_id():
             print(f"❌ [DEBUG] client_id manquant pour {plateforme_nom}")
-            print(f"📋 [DEBUG] Configuration client: {plateforme.config.get('client_id', 'Non trouvé')}")
             return jsonify({"error": "Client ID non configuré"}), 500
-
 
         state = secrets.token_urlsafe(32)
         print(f"🔑 [DEBUG] State généré: {state}")
@@ -152,11 +151,26 @@ def initiate_oauth(plateforme_nom):
         print(f"🔧 [DEBUG] Client ID: {client_id}")
         print(f"🔧 [DEBUG] Scopes: {scopes}")
         
-        redirect_uri = url_for('utilisateur_plateforme_bp.oauth_callback', 
-                               plateforme_nom=plateforme_nom, 
-                               _external=True)
+        # ✅ Utiliser redirect_uri de la config si disponible, sinon générer dynamiquement
+        redirect_uri = plateforme.config.get('redirect_uri')
         
-        print(f"🔗 [DEBUG] Redirect URI: {redirect_uri}")
+        if redirect_uri:
+            # Si redirect_uri contient un placeholder {PUBLIC_URL}, le remplacer
+            public_url = os.getenv('PUBLIC_URL')
+            if public_url and '{PUBLIC_URL}' in redirect_uri:
+                redirect_uri = redirect_uri.replace('{PUBLIC_URL}', public_url)
+            print(f"🔗 [DEBUG] Redirect URI (depuis config): {redirect_uri}")
+        else:
+            # Sinon générer dynamiquement
+            public_url = os.getenv('PUBLIC_URL')
+            if public_url:
+                redirect_uri = f"{public_url}/api/plateformes/oauth/{plateforme_nom}/callback"
+            else:
+                redirect_uri = url_for('utilisateur_plateforme_bp.oauth_callback', 
+                                       plateforme_nom=plateforme_nom, 
+                                       _external=True,
+                                       _scheme='https')
+            print(f"🔗 [DEBUG] Redirect URI (généré): {redirect_uri}")
         
         auth_url = plateforme.config.get('auth_url')
         if not auth_url:
@@ -187,107 +201,275 @@ def initiate_oauth(plateforme_nom):
     except Exception as e:
         db.session.rollback()
         print(f"❌ [DEBUG ERREUR] Erreur dans initiate_oauth: {str(e)}")
-        print(f"🔍 [DEBUG ERREUR] Type d'erreur: {type(e).__name__}")
         import traceback
-        print(f"🔍 [DEBUG ERREUR] Stack trace:")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 
 def oauth_callback(plateforme_nom):
-    """Gère le callback OAuth après authentification"""
-    print(f"🔍 [DEBUG CALLBACK] Début oauth_callback - Plateforme: {plateforme_nom}")
-    print(f"🔍 [DEBUG CALLBACK] Args de requête: {request.args}")
-    
-    code = request.args.get('code')
-    state = request.args.get('state')
-    error = request.args.get('error')
-    
-    print(f"🔍 [DEBUG CALLBACK] Code: {code}")
-    print(f"🔍 [DEBUG CALLBACK] State: {state}")
-    print(f"🔍 [DEBUG CALLBACK] Error: {error}")
-
-    if error:
-        print(f"❌ [DEBUG CALLBACK] Erreur OAuth: {error}")
-        return jsonify({"error": f"Erreur d'authentification: {error}"}), 400
-
-    if not code or not state:
-        print(f"❌ [DEBUG CALLBACK] Paramètres manquants - code: {bool(code)}, state: {bool(state)}")
-        return jsonify({"error": "Paramètres code ou state manquants"}), 400
-
+    """Gère le callback OAuth"""
     try:
+        import os
+        
+        print(f"🔍 [DEBUG CALLBACK] Plateforme: {plateforme_nom}")
+        print(f"🔍 [DEBUG CALLBACK] Args: {request.args}")
+        
+        code = request.args.get('code')
+        state = request.args.get('state')
+        error = request.args.get('error')
+
+        if error:
+            return jsonify({
+                "error": f"Erreur OAuth: {error}",
+                "description": request.args.get('error_description', '')
+            }), 400
+
+        if not code or not state:
+            return jsonify({"error": "Paramètres manquants"}), 400
+
         oauth_state = OAuthState.query.filter_by(state=state).first()
-        if not oauth_state:
-            print(f"❌ [DEBUG CALLBACK] State invalide: {state}")
-            return jsonify({"error": "State invalide"}), 400
+        if not oauth_state or not oauth_state.is_valid():
+            return jsonify({"error": "State invalide ou expiré"}), 400
 
-        print(f"✅ [DEBUG CALLBACK] State validé - User ID: {oauth_state.utilisateur_id}, Plateforme ID: {oauth_state.plateforme_id}")
+        if oauth_state.used:
+            return jsonify({"error": "State déjà utilisé"}), 400
 
-        plateforme = PlateformeConfig.query.get(oauth_state.plateforme_id)
-        if not plateforme:
-            print(f"❌ [DEBUG CALLBACK] Plateforme introuvable - ID: {oauth_state.plateforme_id}")
-            return jsonify({"error": "Plateforme introuvable"}), 404
-
-        print(f"✅ [DEBUG CALLBACK] Plateforme récupérée: {plateforme.nom}")
-
-        token_url = plateforme.config.get('token_url')
-        client_id = plateforme.get_client_id()
-        client_secret = plateforme.get_client_secret()
-        
-        print(f"🔧 [DEBUG CALLBACK] Token URL: {token_url}")
-        print(f"🔧 [DEBUG CALLBACK] Client ID: {client_id}")
-        print(f"🔧 [DEBUG CALLBACK] Client Secret: {'***' if client_secret else 'Non configuré'}")
-
-        if not token_url:
-            print(f"❌ [DEBUG CALLBACK] token_url manquant")
-            return jsonify({"error": "URL de token non configurée"}), 500
-
-        redirect_uri = url_for('utilisateur_plateforme_bp.oauth_callback', 
-                              plateforme_nom=plateforme_nom, 
-                              _external=True)
-        
-        token_data = {
-            'client_id': client_id,
-            'client_secret': client_secret,
-            'code': code,
-            'grant_type': 'authorization_code',
-            'redirect_uri': redirect_uri
-        }
-
-        print(f"🔧 [DEBUG CALLBACK] Données token: { {**token_data, 'client_secret': '***'} }")
-
-        response = requests.post(token_url, data=token_data)
-        
-        print(f"🔧 [DEBUG CALLBACK] Réponse token - Status: {response.status_code}")
-        print(f"🔧 [DEBUG CALLBACK] Réponse token - Headers: {dict(response.headers)}")
-        print(f"🔧 [DEBUG CALLBACK] Réponse token - Body: {response.text}")
-
-        if response.status_code != 200:
-            print(f"❌ [DEBUG CALLBACK] Erreur lors de l'échange du token: {response.text}")
-            return jsonify({"error": "Échec de l'échange du code contre le token"}), 400
-
-        token_info = response.json()
-        print(f"✅ [DEBUG CALLBACK] Token obtenu avec succès: {list(token_info.keys())}")
-
-        db.session.delete(oauth_state)
+        oauth_state.mark_as_used()
         db.session.commit()
 
-        print(f"✅ [DEBUG CALLBACK] Callback OAuth terminé avec succès")
+        plateforme = PlateformeConfig.query.get(oauth_state.plateforme_id)
+        if not plateforme or plateforme.nom != plateforme_nom:
+            return jsonify({"error": "Plateforme invalide"}), 400
+
+        token_url = plateforme.config.get('token_url')
+        if not token_url:
+            return jsonify({"error": "URL de token non configurée"}), 500
+
+        # ✅ Utiliser le même redirect_uri que dans initiate_oauth
+        redirect_uri = plateforme.config.get('redirect_uri')
+        
+        if redirect_uri:
+            # Si redirect_uri contient un placeholder {PUBLIC_URL}, le remplacer
+            public_url = os.getenv('PUBLIC_URL')
+            if public_url and '{PUBLIC_URL}' in redirect_uri:
+                redirect_uri = redirect_uri.replace('{PUBLIC_URL}', public_url)
+            print(f"🔗 [DEBUG CALLBACK] Redirect URI (depuis config): {redirect_uri}")
+        else:
+            # Sinon générer dynamiquement (même logique que initiate_oauth)
+            public_url = os.getenv('PUBLIC_URL')
+            if public_url:
+                redirect_uri = f"{public_url}/api/plateformes/oauth/{plateforme_nom}/callback"
+            else:
+                redirect_uri = url_for('utilisateur_plateforme_bp.oauth_callback', 
+                                       plateforme_nom=plateforme_nom, 
+                                       _external=True,
+                                       _scheme='https')
+            print(f"🔗 [DEBUG CALLBACK] Redirect URI (généré): {redirect_uri}")
+        
+        token_data = {
+            'client_id': plateforme.get_client_id(),
+            'client_secret': plateforme.get_client_secret(),
+            'code': code,
+            'redirect_uri': redirect_uri,
+            'grant_type': 'authorization_code'
+        }
+
+        print(f"🔧 [DEBUG CALLBACK] Token data: {dict(**token_data, client_secret='***')}")
+
+        token_response = requests.post(token_url, data=token_data)
+        
+        print(f"🔧 [DEBUG CALLBACK] Status: {token_response.status_code}")
+        print(f"🔧 [DEBUG CALLBACK] Response: {token_response.text}")
+        
+        if token_response.status_code != 200:
+            return jsonify({
+                "error": "Échec de l'échange de token",
+                "details": token_response.text
+            }), 500
+
+        token_json = token_response.json()
+        access_token = token_json.get('access_token')
+        expires_in = token_json.get('expires_in')
+        refresh_token = token_json.get('refresh_token')
+
+        if not access_token:
+            return jsonify({"error": "Token d'accès non reçu"}), 500
+
+        user_info_url = plateforme.config.get('user_info_url')
+        external_id = None
+        
+        if user_info_url:
+            headers = {'Authorization': f'Bearer {access_token}'}
+            user_info_response = requests.get(user_info_url, headers=headers)
+            
+            if user_info_response.status_code == 200:
+                user_info = user_info_response.json()
+                external_id = user_info.get('id') or user_info.get('sub')
+
+        user_plateforme = UtilisateurPlateforme.get_user_platform(
+            oauth_state.utilisateur_id,
+            plateforme_nom
+        )
+
+        if user_plateforme:
+            user_plateforme.update_token(access_token, expires_in=expires_in)
+            if external_id:
+                user_plateforme.external_id = external_id
+            if refresh_token:
+                user_plateforme.meta['refresh_token'] = refresh_token
+        else:
+            user_plateforme = UtilisateurPlateforme(
+                utilisateur_id=oauth_state.utilisateur_id,
+                plateforme_id=plateforme.id,
+                external_id=external_id,
+                access_token=access_token,
+                meta={'refresh_token': refresh_token} if refresh_token else {}
+            )
+            user_plateforme.update_token(access_token, expires_in=expires_in)
+            db.session.add(user_plateforme)
+
+        db.session.commit()
+
+        print(f"✅ [DEBUG CALLBACK] Connexion réussie")
 
         return jsonify({
-            "success": True,
-            "message": "Authentification réussie",
-            "tokens": token_info
+            "message": f"Connexion à {plateforme_nom} réussie",
+            "data": user_plateforme.to_dict()
         }), 200
 
     except Exception as e:
         db.session.rollback()
-        print(f"❌ [DEBUG CALLBACK ERREUR] Erreur dans oauth_callback: {str(e)}")
+        print(f"❌ [DEBUG CALLBACK ERREUR] {str(e)}")
         import traceback
-        print(f"🔍 [DEBUG CALLBACK ERREUR] Stack trace:")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+# def oauth_callback(plateforme_nom):
+#     """Gère le callback OAuth après authentification"""
+#     print(f"🔍 [DEBUG CALLBACK] Début oauth_callback - Plateforme: {plateforme_nom}")
+    
+#     code = request.args.get('code')
+#     state = request.args.get('state')
+#     error = request.args.get('error')
+    
+#     print(f"🔍 [DEBUG CALLBACK] Code: {code}")
+#     print(f"🔍 [DEBUG CALLBACK] State: {state}")
+
+#     if error:
+#         print(f"❌ [DEBUG CALLBACK] Erreur OAuth: {error}")
+#         return jsonify({"error": f"Erreur d'authentification: {error}"}), 400
+
+#     if not code or not state:
+#         print(f"❌ [DEBUG CALLBACK] Paramètres manquants")
+#         return jsonify({"error": "Paramètres code ou state manquants"}), 400
+
+#     try:
+#         oauth_state = OAuthState.query.filter_by(state=state).first()
+#         if not oauth_state or not oauth_state.is_valid():
+#             print(f"❌ [DEBUG CALLBACK] State invalide ou expiré")
+#             return jsonify({"error": "State invalide ou expiré"}), 400
+
+#         if oauth_state.used:
+#             print(f"❌ [DEBUG CALLBACK] State déjà utilisé")
+#             return jsonify({"error": "State déjà utilisé"}), 400
+
+#         oauth_state.mark_as_used()
+#         db.session.commit()
+
+#         plateforme = PlateformeConfig.query.get(oauth_state.plateforme_id)
+#         if not plateforme or plateforme.nom != plateforme_nom:
+#             return jsonify({"error": "Plateforme invalide"}), 400
+
+#         token_url = plateforme.config.get('token_url')
+#         if not token_url:
+#             return jsonify({"error": "URL de token non configurée"}), 500
+
+#         # ⬇️ MODIFICATION ICI : Ajout de _scheme='https'
+#         redirect_uri = url_for('utilisateur_plateforme_bp.oauth_callback', 
+#                               plateforme_nom=plateforme_nom, 
+#                               _external=True,
+#                               _scheme='https')  # ✅ Force HTTPS
+        
+#         print(f"🔗 [DEBUG CALLBACK] Redirect URI pour token: {redirect_uri}")
+        
+#         token_data = {
+#             'client_id': plateforme.get_client_id(),
+#             'client_secret': plateforme.get_client_secret(),
+#             'code': code,
+#             'redirect_uri': redirect_uri,
+#             'grant_type': 'authorization_code'
+#         }
+
+#         token_response = requests.post(token_url, data=token_data)
+        
+#         print(f"🔧 [DEBUG CALLBACK] Réponse token - Status: {token_response.status_code}")
+        
+#         if token_response.status_code != 200:
+#             print(f"❌ [DEBUG CALLBACK] Erreur token: {token_response.text}")
+#             return jsonify({
+#                 "error": "Échec de l'échange de token",
+#                 "details": token_response.text
+#             }), 500
+
+#         token_json = token_response.json()
+#         access_token = token_json.get('access_token')
+#         expires_in = token_json.get('expires_in')
+#         refresh_token = token_json.get('refresh_token')
+
+#         if not access_token:
+#             return jsonify({"error": "Token d'accès non reçu"}), 500
+
+#         # Récupération des infos utilisateur
+#         user_info_url = plateforme.config.get('user_info_url')
+#         external_id = None
+        
+#         if user_info_url:
+#             headers = {'Authorization': f'Bearer {access_token}'}
+#             user_info_response = requests.get(user_info_url, headers=headers)
+            
+#             if user_info_response.status_code == 200:
+#                 user_info = user_info_response.json()
+#                 external_id = user_info.get('id') or user_info.get('sub')
+
+#         # Créer ou mettre à jour la connexion
+#         user_plateforme = UtilisateurPlateforme.get_user_platform(
+#             oauth_state.utilisateur_id,
+#             plateforme_nom
+#         )
+
+#         if user_plateforme:
+#             user_plateforme.update_token(access_token, expires_in=expires_in)
+#             if external_id:
+#                 user_plateforme.external_id = external_id
+#             if refresh_token:
+#                 user_plateforme.meta['refresh_token'] = refresh_token
+#         else:
+#             user_plateforme = UtilisateurPlateforme(
+#                 utilisateur_id=oauth_state.utilisateur_id,
+#                 plateforme_id=plateforme.id,
+#                 external_id=external_id,
+#                 access_token=access_token,
+#                 meta={'refresh_token': refresh_token} if refresh_token else {}
+#             )
+#             user_plateforme.update_token(access_token, expires_in=expires_in)
+#             db.session.add(user_plateforme)
+
+#         db.session.commit()
+
+#         print(f"✅ [DEBUG CALLBACK] Connexion OAuth réussie")
+
+#         return jsonify({
+#             "message": f"Connexion à {plateforme_nom} réussie",
+#             "data": user_plateforme.to_dict()
+#         }), 200
+
+#     except Exception as e:
+#         db.session.rollback()
+#         print(f"❌ [DEBUG CALLBACK ERREUR] Erreur: {str(e)}")
+#         import traceback
+#         traceback.print_exc()
+#         return jsonify({"error": str(e)}), 500
+    
 def oauth_callback(plateforme_nom):
     """Gère le callback OAuth"""
     try:
@@ -323,7 +505,7 @@ def oauth_callback(plateforme_nom):
         if not token_url:
             return jsonify({"error": "URL de token non configurée"}), 500
 
-        redirect_uri = url_for('oauth_callback', plateforme_nom=plateforme_nom, _external=True)
+        redirect_uri = url_for('oauth_callback', plateforme_nom=plateforme_nom, _external=True,_scheme='https')
         #   redirect_uri = url_for('utilisateur_plateforme_bp.oauth_callback', 
         #                        plateforme_nom=plateforme_nom, 
         #                        _external=True)

@@ -28,3 +28,9 @@ def update_publication(publication_id):
 @jwt_required()
 def delete_publication(publication_id):
     return publication_controller.delete_publication(publication_id)
+
+
+@publication_bp.route('/stats', methods=["GET"])
+@jwt_required()
+def get_publication_stats():
+    return publication_controller.get_publication_stats()

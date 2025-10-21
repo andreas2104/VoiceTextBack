@@ -7,7 +7,7 @@ class TypeModelEnum(enum.Enum):
     text = "text"
     image = "image"
     multimodal = "multimodal"
-
+    video = "video"
 
 class ModelIA(db.Model):
     __tablename__ = "model_ia"

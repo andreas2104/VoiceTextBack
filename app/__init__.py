@@ -16,6 +16,8 @@ from app.routes.historique_routes import historique_bp
 from app.routes.publication_routes import publication_bp
 from dotenv import load_dotenv
 import os
+from werkzeug.middleware.proxy_fix import ProxyFix
+
 
 def create_app():
     load_dotenv()
@@ -23,7 +25,8 @@ def create_app():
     app = Flask(__name__)
 
     app.url_map.strict_slashes = False
-    
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
     app.config.update({
         'SECRET_KEY': os.getenv("SECRET_KEY", "default_secret_key"),
         'JWT_SECRET_KEY': os.getenv("JWT_SECRET_KEY", "your-jwt-secret-key"),
@@ -36,7 +39,10 @@ def create_app():
             'max_overflow': 20
         },
         'JWT_ACCESS_TOKEN_EXPIRES': 3600,  
-        'JWT_ALGORITHM': 'HS256'
+        'JWT_ALGORITHM': 'HS256',
+        'JWT_TOKEN_LOCATION': ['headers'],  
+        'JWT_HEADER_NAME': 'Authorization',
+        'JWT_HEADER_TYPE': 'Bearer',
     })
     
     CORS(app,
@@ -44,7 +50,7 @@ def create_app():
          supports_credentials=True,
          allow_headers=["Content-Type", "Authorization"],
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-         max_age=3600)  # Cache preflight requests
+         max_age=3600) 
 
     jwt = JWTManager(app)
     

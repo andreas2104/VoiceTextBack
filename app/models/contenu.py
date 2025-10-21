@@ -6,6 +6,7 @@ class TypeContenuEnum(enum.Enum):
     text = "text"
     video = "video"
     image = "image"
+    multimodal = "multimodal"
 
 class Contenu(db.Model):
     __tablename__ = "contenu"
@@ -19,8 +20,11 @@ class Contenu(db.Model):
     type_contenu = db.Column(db.Enum(TypeContenuEnum), default=TypeContenuEnum.text, nullable=False)
     texte = db.Column(db.Text, nullable=True)
     image_url = db.Column(db.String(300), nullable=True)
+    contenu_structure = db.Column(db.JSON, nullable=True)
     meta = db.Column(db.JSON, nullable=True)
     date_creation = db.Column(db.DateTime, default=datetime.utcnow)
+    id_projet = db.Column(db.Integer, db.ForeignKey('projets.id', ondelete="SET NULL"),default=1, nullable=True)
+
 
     def __repr__(self):
         return f"<Contenu {self.id}: {self.titre}>"
@@ -29,6 +33,7 @@ class Contenu(db.Model):
         return {
             "id": self.id,
             "id_utilisateur": self.id_utilisateur,
+            "id_projet": self.id_projet,
             "id_model": self.id_model,
             "id_template": self.id_template,
             "id_prompt": self.id_prompt,
@@ -36,6 +41,7 @@ class Contenu(db.Model):
             "type_contenu": self.type_contenu.value if self.type_contenu else None,
             "texte": self.texte,
             "image_url": self.image_url,
+            "contenu_structure": self.contenu_structure,
             "meta": self.meta,
             "date_creation": self.date_creation.isoformat() if self.date_creation else None,
         }

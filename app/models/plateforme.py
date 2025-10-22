@@ -52,7 +52,7 @@ class UtilisateurPlateforme(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     utilisateur_id = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable=False)
-    plateforme_id = db.Column(db.Integer, db.ForeignKey('plateforme_config.id'), nullable=False)
+    plateforme_id = db.Column(db.Integer, db.ForeignKey('plateforme_config.id', ondelete='CASCADE'), nullable=False)
     external_id = db.Column(db.String(200), nullable=True)
     access_token = db.Column(db.Text, nullable=True)
     token_expires_at = db.Column(db.DateTime, nullable=True)
@@ -61,7 +61,7 @@ class UtilisateurPlateforme(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     utilisateur = db.relationship('Utilisateur', backref=db.backref('plateformes', lazy=True))
-    plateforme = db.relationship('PlateformeConfig', backref=db.backref('utilisateurs', lazy=True))
+    plateforme = db.relationship('PlateformeConfig', backref=db.backref('utilisateurs', lazy=True, cascade="all, delete-orphan"))
 
     def to_dict(self):
         return {
@@ -102,7 +102,7 @@ class OAuthState(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     state = db.Column(db.String(255), unique=True, nullable=False)
     utilisateur_id = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable=False)
-    plateforme_id = db.Column(db.Integer, db.ForeignKey('plateforme_config.id'), nullable=False)
+    plateforme_id = db.Column(db.Integer, db.ForeignKey('plateforme_config.id', ondelete='CASCADE'), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     used = db.Column(db.Boolean, default=False)
 

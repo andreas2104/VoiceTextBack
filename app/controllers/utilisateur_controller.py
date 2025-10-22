@@ -17,6 +17,7 @@ def get_all_utilisateurs():
             'id': utilisateur.id,
             'nom': utilisateur.nom,
             'prenom': utilisateur.prenom,
+            'photo': utilisateur.photo,
             'email': utilisateur.email,
             'type_compte': utilisateur.type_compte.value,
             'date_creation': utilisateur.date_creation.isoformat(),
@@ -39,6 +40,7 @@ def get_utilisateur_by_id(utilisateur_id):
         'id': utilisateur.id,
         'nom': utilisateur.nom,
         'prenom': utilisateur.prenom,
+        'photo': utilisateur.photo,
         'email': utilisateur.email,
         'type_compte': utilisateur.type_compte.value,
         'date_creation': utilisateur.date_creation.isoformat(),
@@ -53,7 +55,6 @@ def update_utilisateur(utilisateur_id):
         if not current_user:
             return jsonify({"error": "Utilisateur courant non trouvé"}), 404
 
-        # Vérification : seul l'admin peut modifier un autre utilisateur
         if current_user_id != utilisateur_id and current_user.type_compte != TypeCompteEnum.admin:
             return jsonify({"error": "Unauthorized"}), 403
 
@@ -61,16 +62,12 @@ def update_utilisateur(utilisateur_id):
         utilisateur = Utilisateur.query.get(utilisateur_id)
         if not utilisateur:
             return jsonify({"error": "Utilisateur non trouvé"}), 404
-
-        # Gestion du mot de passe
         if "mot_de_passe" in data and data["mot_de_passe"]:
             utilisateur.mot_de_passe = generate_password_hash(data["mot_de_passe"])
 
-        # Gestion de la photo
         if "photo" in data:
             utilisateur.photo = data["photo"]
 
-        # Gestion du type_compte : seul un admin peut changer le rôle
         if "type_compte" in data:
             if current_user.type_compte != TypeCompteEnum.admin:
                 return jsonify({"error": "Unauthorized to change account type"}), 403
@@ -90,8 +87,6 @@ def update_utilisateur(utilisateur_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
-
-
 
 def delete_utilisateur(utilisateur_id):  
     current_user_id = get_jwt_identity()
@@ -132,7 +127,8 @@ def current_utilisateur():
             "photo": utilisateur.photo
         }
 
-        return jsonify(utilisateur_data), 200
+        # Retourne sous la clé "utilisateur"
+        return jsonify({"utilisateur": utilisateur_data}), 200
     except Exception as e:
         print("Erreur dans get_current_utilisateur:", e)
         return jsonify({"error": str(e)}), 500

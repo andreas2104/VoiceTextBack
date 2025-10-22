@@ -1,4 +1,5 @@
-from flask import request, jsonify, url_for
+# app/controllers/plateforme_controller.py
+from flask import request, jsonify
 from app.extensions import db
 from app.models.plateforme import PlateformeConfig, UtilisateurPlateforme, OAuthState
 from app.models.utilisateur import Utilisateur, TypeCompteEnum
@@ -33,13 +34,12 @@ def create_plateforme():
         if existing:
             existing.active = True
             existing.config = config
+            existing.updated_at = datetime.utcnow()
             db.session.commit()
             return jsonify({
-                "message": f"plateforme {nom} réactivée",
+                "message": f"Plateforme {nom} réactivée",
                 "id": existing.id
             }), 200
-        # if PlateformeConfig.query.filter_by(nom=nom).first():
-        #     return jsonify({"error": f"La plateforme {nom} existe déjà"}), 400
 
         plateforme = PlateformeConfig(
             nom=nom,
@@ -76,6 +76,7 @@ def get_plateforme_by_id(plateforme_id):
     current_user = Utilisateur.query.get(current_user_id)
     if not current_user_id:
         return jsonify({"error":"Authentification requise"}), 401
+    
     plateforme = PlateformeConfig.query.get(plateforme_id)
     if not plateforme:
         return jsonify({"error": "Plateforme introuvable"}), 404
@@ -110,7 +111,7 @@ def update_plateforme(plateforme_id):
             plateforme.config = config
 
         plateforme.active = data.get("active", plateforme.active)
-        plateforme.date_modification = datetime.utcnow()
+        plateforme.updated_at = datetime.utcnow()
 
         db.session.commit()
         return jsonify({"message": "Plateforme mise à jour avec succès"}), 200
@@ -121,6 +122,7 @@ def update_plateforme(plateforme_id):
 
 
 def delete_plateforme(plateforme_id):
+    """Supprime une plateforme et toutes ses dépendances"""
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
@@ -132,11 +134,26 @@ def delete_plateforme(plateforme_id):
         return jsonify({"error": "Plateforme introuvable"}), 404
 
     try:
+        # Supprimer manuellement les dépendances pour être sûr
+        # (normalement CASCADE devrait le faire, mais on est explicite)
+        
+        # 1. Supprimer tous les OAuthState liés
+        OAuthState.query.filter_by(plateforme_id=plateforme_id).delete()
+        
+        # 2. Supprimer toutes les connexions utilisateurs
+        UtilisateurPlateforme.query.filter_by(plateforme_id=plateforme_id).delete()
+        
+        # 3. Supprimer la plateforme
         db.session.delete(plateforme)
+        
         db.session.commit()
-        return jsonify({"message": "Plateforme supprimée avec succès"}), 200
+        
+        return jsonify({
+            "message": f"Plateforme {plateforme.nom} supprimée avec succès"
+        }), 200
+        
     except Exception as e:
         db.session.rollback()
-        return jsonify({"error": str(e)}), 500
-
-
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Erreur lors de la suppression: {str(e)}"}), 500

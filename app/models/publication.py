@@ -13,10 +13,9 @@ class Publication(db.Model):
     __tablename__ = 'publications'
     
     id = db.Column(db.Integer, primary_key=True)
-    id_utilisateur = db.Column(db.Integer, db.ForeignKey('utilisateurs.id'), nullable=False)
-    id_contenu = db.Column(db.Integer, db.ForeignKey('contenu.id'), nullable=False)
-    # CORRECTION ICI - changer 'plateformes.id' vers 'plateforme_config.id'
-    id_plateforme = db.Column(db.Integer, db.ForeignKey('plateforme_config.id'), nullable=False)
+    id_utilisateur = db.Column(db.Integer, db.ForeignKey('utilisateurs.id', ondelete='CASCADE'), nullable=False)
+    id_contenu = db.Column(db.Integer, db.ForeignKey('contenu.id', ondelete='CASCADE'), nullable=False)
+    id_plateforme = db.Column(db.Integer, db.ForeignKey('plateforme_config.id', ondelete='SET NULL'), nullable=True)
     titre_publication = db.Column(db.String(255), nullable=False)
     statut = db.Column(db.Enum(StatutPublicationEnum), default=StatutPublicationEnum.brouillon)
     date_programmee = db.Column(db.DateTime)
@@ -31,7 +30,6 @@ class Publication(db.Model):
     date_creation = db.Column(db.DateTime, default=datetime.utcnow)
     date_modification = db.Column(db.DateTime, onupdate=datetime.utcnow)
     
-    # Ajouter la relation
     plateforme = db.relationship('PlateformeConfig', backref=db.backref('publications', lazy=True))
     
     def to_dict(self):

@@ -1,4 +1,4 @@
-from .utilisateur import Utilisateur
+from .utilisateur import Utilisateur,Token
 from .projet import Projet
 from .modelIA import ModelIA
 from .template import Template

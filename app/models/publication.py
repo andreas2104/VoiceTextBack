@@ -15,7 +15,8 @@ class Publication(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     id_utilisateur = db.Column(db.Integer, db.ForeignKey('utilisateurs.id', ondelete='CASCADE'), nullable=False)
     id_contenu = db.Column(db.Integer, db.ForeignKey('contenu.id', ondelete='CASCADE'), nullable=False)
-    id_plateforme = db.Column(db.Integer, db.ForeignKey('plateforme_config.id', ondelete='SET NULL'), nullable=True)
+    # id_plateforme = db.Column(db.Integer, db.ForeignKey('plateforme_config.id', ondelete='SET NULL'), nullable=True)
+    plateforme = db.Column(db.String(50), nullable=False, default='x')
     titre_publication = db.Column(db.String(255), nullable=False)
     statut = db.Column(db.Enum(StatutPublicationEnum), default=StatutPublicationEnum.brouillon)
     date_programmee = db.Column(db.DateTime)
@@ -30,14 +31,14 @@ class Publication(db.Model):
     date_creation = db.Column(db.DateTime, default=datetime.utcnow)
     date_modification = db.Column(db.DateTime, onupdate=datetime.utcnow)
     
-    plateforme = db.relationship('PlateformeConfig', backref=db.backref('publications', lazy=True))
-    
+    contenu = db.relationship("Contenu", backref=db.backref("publications", lazy=True))
+    # plateforme = db.relationship('PlateformeConfig', backref=db.backref('publications', lazy=True))
     def to_dict(self):
         return {
             'id': self.id,
             'id_utilisateur': self.id_utilisateur,
             'id_contenu': self.id_contenu,
-            'id_plateforme': self.id_plateforme,
+            'plateforme': self.plateforme,
             'titre_publication': self.titre_publication,
             'statut': self.statut.value,
             'date_programmee': self.date_programmee.isoformat() if self.date_programmee else None,
@@ -50,5 +51,11 @@ class Publication(db.Model):
             'nombre_likes': self.nombre_likes,
             'nombre_partages': self.nombre_partages,
             'date_creation': self.date_creation.isoformat(),
-            'date_modification': self.date_modification.isoformat() if self.date_modification else None
+            'date_modification': self.date_modification.isoformat() if self.date_modification else None,
+
+
+            "contenu": {
+                "texte": self.contenu.texte if self.contenu else None,
+                "image_url": self.contenu.image_url if self.contenu else None
+            }
         }

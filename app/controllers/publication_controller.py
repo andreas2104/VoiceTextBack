@@ -8,15 +8,25 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func
 from datetime import datetime, timedelta, timezone
 import requests
-from app.services.x_service import publish_to_x_api,delete_publication_from_x
+from app.services.x_service import publish_to_x_api, delete_publication_from_x
+from app.scheduler.scheduler import scheduler
 
 
 def create_publication():
     """Crée une publication immédiate ou programmée, avec publication sur X via x_service."""
     current_user_id = get_jwt_identity()
+    
+    # ✅ CONVERSION EN INT pour éviter les problèmes de comparaison
+    try:
+        current_user_id = int(current_user_id)
+    except (TypeError, ValueError):
+        current_app.logger.error(f"❌ JWT identity invalide: {current_user_id}")
+        return jsonify({"error": "Token invalide"}), 401
+    
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user:
+        current_app.logger.error(f"❌ Utilisateur {current_user_id} non trouvé")
         return jsonify({"error": "Utilisateur non trouvé"}), 404
 
     data = request.get_json()
@@ -27,28 +37,37 @@ def create_publication():
         contenu = Contenu.query.get(data["id_contenu"])
         if not contenu:
             return jsonify({"error": "Contenu introuvable"}), 404
+        
+        # ✅ Comparaison correcte après conversion
         if contenu.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
-            return jsonify({"error": "Non autorisé"}), 403
-        # texte_contenu = data.get("message") or getattr(contenu, "texte", "") or getattr(contenu, "titre", "") or ""
+            current_app.logger.error(
+                f"❌ ACCÈS REFUSÉ - User {current_user_id} tente d'utiliser contenu {contenu.id} "
+                f"(propriétaire: {contenu.id_utilisateur})"
+            )
+            return jsonify({"error": "Non autorisé à utiliser ce contenu"}), 403
+        
         texte_contenu = data.get("message") or contenu.texte or contenu.titre or ""
         image_url = data.get("image_url") or contenu.image_url
         
-        
         if not texte_contenu:
             return jsonify({"error": "Aucun contenu texte disponible pour la publication"}), 400
-
-        url_media = data.get("image_url") or getattr(contenu, "url_media", None) or getattr(contenu, "image_url", None)
 
         # Gestion de la planification
         statut = StatutPublicationEnum.brouillon
         date_programmee = None
         publier_maintenant = True
+        task_id = None
+
+        now = datetime.now(timezone.utc)
 
         if data.get("date_programmee"):
             try:
-                date_programmee = datetime.fromisoformat(data["date_programmee"].replace('Z', '+00:00'))
-                now = datetime.now(timezone.utc)
-
+                date_str = data["date_programmee"].replace('Z', '+00:00')
+                date_programmee = datetime.fromisoformat(date_str)
+                
+                if date_programmee.tzinfo is None:
+                    date_programmee = date_programmee.replace(tzinfo=timezone.utc)
+                
                 if date_programmee > now:
                     statut = StatutPublicationEnum.programme
                     publier_maintenant = False
@@ -56,7 +75,8 @@ def create_publication():
                     statut = StatutPublicationEnum.publie
                     publier_maintenant = True
                     date_programmee = None
-            except ValueError:
+            except (ValueError, TypeError) as e:
+                current_app.logger.error(f"Erreur format date: {str(e)}")
                 return jsonify({"error": "Format de date invalide"}), 400
         else:
             statut = StatutPublicationEnum.publie
@@ -75,11 +95,9 @@ def create_publication():
             if not token or not token.is_valid():
                 return jsonify({"error": "Token X expiré ou manquant"}), 401
 
-            # Utiliser le texte du contenu correct
             url_publication, tweet_id, result = publish_to_x_api(
                 texte_contenu,  
                 token.access_token, 
-                # url_media 
                 image_url
             )
 
@@ -99,15 +117,19 @@ def create_publication():
 
             tweet_data = result or {}
 
+        titre_par_defaut = data.get("titre_publication") or getattr(
+            contenu, "titre", f"Publication X - {now.strftime('%d/%m/%Y')}"
+        )
+
         # Enregistrement en base
         publication = Publication(
             id_utilisateur=current_user_id,
             id_contenu=data["id_contenu"],
             plateforme='x',
-            titre_publication=data.get("titre_publication") or getattr(contenu, "titre", f"Publication X - {datetime.utcnow().strftime('%d/%m/%Y')}"),
+            titre_publication=titre_par_defaut,
             statut=statut,
             date_programmee=date_programmee,
-            date_publication=datetime.utcnow() if statut == StatutPublicationEnum.publie else None,
+            date_publication=now if statut == StatutPublicationEnum.publie else None,
             url_publication=url_publication,
             id_externe=tweet_id,
             parametres_publication={
@@ -115,34 +137,59 @@ def create_publication():
                 "api_response": tweet_data,
                 "publication_immediate": publier_maintenant,
                 "message": texte_contenu,
-                 "image_url": image_url    
-                # "image_url": url_media     
+                "image_url": image_url,
+                "task_id": task_id    
             }
         )
 
         db.session.add(publication)
+        db.session.flush()
+        
+        # Programmation avec scheduler
+        if statut == StatutPublicationEnum.programme and date_programmee:
+            try:
+                from scheduler.scheduler import scheduler
+                now = datetime.now(timezone.utc)
+                delay_seconds = (date_programmee - now).total_seconds()
+
+                if delay_seconds > 0:
+                    job_id = f'publication_{publication.id}'
+                    scheduler.scheduler.add_job(
+                        func=scheduler.execute_publication_programmee,
+                        trigger='date',
+                        run_date=date_programmee,
+                        args=[publication.id],
+                        id=job_id
+                    )
+                    task_id = job_id
+                    publication.parametres_publication['task_id'] = task_id
+                    current_app.logger.info(f"Tâche programmée: {task_id}")
+            except ImportError:
+                current_app.logger.warning("Scheduler non disponible")
+            except Exception as e:
+                current_app.logger.error(f"Erreur programmation: {str(e)}")
 
         if statut == StatutPublicationEnum.publie:
             if hasattr(contenu, 'est_publie'):
                 contenu.est_publie = True
             if hasattr(contenu, 'date_publication'):
-                contenu.date_publication = datetime.utcnow()
+                contenu.date_publication = now  
 
         db.session.commit()
+
+        # Planifier récupération métriques
+        try:
+            if publication.statut == StatutPublicationEnum.publie and publication.id_externe:
+                scheduler.update_publication_metrics(publication.id)
+                scheduler.planifier_updates_metrics(publication.id)
+        except Exception:
+            pass
+
+        current_app.logger.info(f"✅ Publication créée avec succès (ID: {publication.id})")
 
         return jsonify({
             "message": "Publication créée avec succès" if publier_maintenant else "Publication programmée avec succès",
             "publication": publication.to_dict()
-            #   {
-                # "id": publication.id,
-                # "titre": publication.titre_publication,
-                # "statut": publication.statut.value,
-                # "url_publication": publication.url_publication,
-                # "date_publication": publication.date_publication.isoformat() if publication.date_publication else None,
-                # "date_programmee": publication.date_programmee.isoformat() if publication.date_programmee else None,
-                # "contenu_publie": texte_contenu,
-                # "image_utilisee": image_url
-            # }
         }), 201
 
     except SQLAlchemyError as e:
@@ -153,12 +200,136 @@ def create_publication():
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Erreur inattendue: {str(e)}")
-        return jsonify({"error": "Erreur inattendue"}), 500
+        return jsonify({"error": "Erreur inattendue", "details": str(e)}), 500
+
+
+def update_publication(publication_id):
+    """Met à jour une publication"""
+    current_user_id = get_jwt_identity()
+    
+    # ✅ CONVERSION EN INT - C'EST LE FIX PRINCIPAL
+    try:
+        current_user_id = int(current_user_id)
+    except (TypeError, ValueError):
+        current_app.logger.error(f"❌ JWT identity invalide: {current_user_id}")
+        return jsonify({"error": "Token invalide"}), 401
+    
+    current_user = Utilisateur.query.get(current_user_id)
+    if not current_user:
+        current_app.logger.error(f"❌ Utilisateur {current_user_id} non trouvé")
+        return jsonify({"error": "Utilisateur non trouvé"}), 404
+
+    publication = Publication.query.get(publication_id)
+    if not publication:
+        current_app.logger.error(f"❌ Publication {publication_id} introuvable")
+        return jsonify({"error": "Publication introuvable"}), 404
+
+    # Logs détaillés avec types
+    current_app.logger.info(f"🔍 Vérification permissions:")
+    current_app.logger.info(f"  - User ID: {current_user_id} (type: {type(current_user_id)})")
+    current_app.logger.info(f"  - Type compte: {current_user.type_compte}")
+    current_app.logger.info(f"  - Publication owner: {publication.id_utilisateur} (type: {type(publication.id_utilisateur)})")
+    current_app.logger.info(f"  - Égalité: {publication.id_utilisateur == current_user_id}")
+    
+    # ✅ Maintenant la comparaison fonctionne correctement
+    if publication.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
+        current_app.logger.error(
+            f"❌ ACCÈS REFUSÉ - User {current_user_id} ({current_user.type_compte}) "
+            f"tente de modifier publication {publication_id} (propriétaire: {publication.id_utilisateur})"
+        )
+        return jsonify({
+            "error": "Non autorisé à modifier cette publication",
+            "details": "Vous ne pouvez modifier que vos propres publications"
+        }), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Aucune donnée fournie"}), 400
+    
+    current_app.logger.info(f"📝 Données de mise à jour: {list(data.keys())}")
+
+    try:
+        champs_modifies = []
+        
+        if "titre_publication" in data:
+            publication.titre_publication = data["titre_publication"]
+            champs_modifies.append("titre")
+            
+        if "statut" in data:
+            try:
+                nouveau_statut = StatutPublicationEnum(data["statut"])
+                ancien_statut = publication.statut
+                publication.statut = nouveau_statut
+                champs_modifies.append(f"statut ({ancien_statut.value} → {nouveau_statut.value})")
+            except ValueError:
+                return jsonify({"error": f"Statut invalide: {data['statut']}"}), 400
+                
+        if "date_programmee" in data:
+            if data["date_programmee"]:
+                date_str = data["date_programmee"].replace('Z', '+00:00')
+                date_prog = datetime.fromisoformat(date_str)
+                if date_prog.tzinfo is None:
+                    date_prog = date_prog.replace(tzinfo=timezone.utc)
+                publication.date_programmee = date_prog
+                champs_modifies.append("date_programmee")
+            else:
+                publication.date_programmee = None
+                champs_modifies.append("date_programmee (supprimée)")
+                
+        if "parametres_publication" in data:
+            if publication.parametres_publication:
+                publication.parametres_publication.update(data["parametres_publication"])
+            else:
+                publication.parametres_publication = data["parametres_publication"]
+            champs_modifies.append("parametres")
+            
+        if "url_publication" in data:
+            publication.url_publication = data["url_publication"]
+            champs_modifies.append("url")
+            
+        if "id_externe" in data:
+            publication.id_externe = data["id_externe"]
+            champs_modifies.append("id_externe")
+            
+        if "message_erreur" in data:
+            publication.message_erreur = data["message_erreur"]
+            champs_modifies.append("message_erreur")
+
+        publication.date_modification = datetime.now(timezone.utc)
+        
+        db.session.commit()
+        
+        current_app.logger.info(
+            f"✅ Publication {publication_id} modifiée par user {current_user_id}. "
+            f"Champs: {', '.join(champs_modifies)}"
+        )
+
+        return jsonify({
+            "message": "Publication mise à jour avec succès",
+            "publication": publication.to_dict(),
+            "champs_modifies": champs_modifies
+        }), 200
+
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        current_app.logger.error(f"❌ Erreur DB: {str(e)}")
+        return jsonify({"error": "Erreur de base de données", "details": str(e)}), 500
+        
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"❌ Erreur inattendue: {str(e)}")
+        return jsonify({"error": "Erreur inattendue", "details": str(e)}), 500
 
 
 def get_all_publications():
     """Récupère toutes les publications selon les permissions"""
     current_user_id = get_jwt_identity()
+    
+    try:
+        current_user_id = int(current_user_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Token invalide"}), 401
+    
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user:
@@ -175,6 +346,12 @@ def get_all_publications():
 def get_publication_by_id(publication_id):
     """Récupère une publication par son ID"""
     current_user_id = get_jwt_identity()
+    
+    try:
+        current_user_id = int(current_user_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Token invalide"}), 401
+    
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user:
@@ -188,55 +365,17 @@ def get_publication_by_id(publication_id):
         return jsonify({"error": "Non autorisé"}), 403
 
     return jsonify(publication.to_dict()), 200
-   
-def update_publication(publication_id):
-    """Met à jour une publication"""
-    current_user_id = get_jwt_identity()
-    current_user = Utilisateur.query.get(current_user_id)
 
-    if not current_user:
-        return jsonify({"error": "Utilisateur non trouvé"}), 404
-
-    publication = Publication.query.get(publication_id)
-    if not publication:
-        return jsonify({"error": "Publication introuvable"}), 404
-
-    if publication.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
-        return jsonify({"error": "Non autorisé"}), 403
-
-    data = request.get_json()
-    try:
-        if "titre_publication" in data:
-            publication.titre_publication = data["titre_publication"]
-        if "statut" in data:
-            try:
-                publication.statut = StatutPublicationEnum(data["statut"])
-            except ValueError:
-                return jsonify({"error": "Statut invalide"}), 400
-        if "date_programmee" in data:
-            publication.date_programmee = datetime.fromisoformat(data["date_programmee"]) if data["date_programmee"] else None
-        if "parametres_publication" in data:
-            publication.parametres_publication = data["parametres_publication"]
-        if "url_publication" in data:
-            publication.url_publication = data["url_publication"]
-        if "id_externe" in data:
-            publication.id_externe = data["id_externe"]
-        if "message_erreur" in data:
-            publication.message_erreur = data["message_erreur"]
-
-        publication.date_modification = datetime.utcnow()
-        db.session.commit()
-
-        return jsonify({"message": "Publication mise à jour avec succès"}), 200
-
-    except SQLAlchemyError as e:
-        db.session.rollback()
-        return jsonify({"error": f"Erreur de base de données: {str(e)}"}), 500
-    
 
 def delete_publication(publication_id):
     """Supprime une publication locale et sur X si applicable"""
     current_user_id = get_jwt_identity()
+    
+    try:
+        current_user_id = int(current_user_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Token invalide"}), 401
+    
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user:
@@ -250,9 +389,7 @@ def delete_publication(publication_id):
         return jsonify({"error": "Non autorisé"}), 403
 
     try:
-        # Supprimer sur X si la publication a été publiée
         if publication.id_externe and publication.statut == StatutPublicationEnum.publie:
-            # Récupérer le token X de l'utilisateur
             token = Token.query.filter_by(
                 utilisateur_id=current_user_id, 
                 provider='x'
@@ -266,16 +403,13 @@ def delete_publication(publication_id):
                 )
                 if not success:
                     current_app.logger.warning(f"Échec suppression sur X : {message}")
-                    # Option: retourner l'erreur ou continuer quand même
-                    # return jsonify({"error": f"Impossible de supprimer sur X: {message}"}), 500
                 else:
                     current_app.logger.info(f"Publication supprimée sur X : {message}")
             else:
-                current_app.logger.warning("Token X invalide ou expiré pour l'utilisateur")
+                current_app.logger.warning("Token X invalide ou expiré")
         else:
-            current_app.logger.info(f"Publication locale uniquement (id_externe: {publication.id_externe}, statut: {publication.statut})")
+            current_app.logger.info(f"Publication locale uniquement")
 
-        # Supprimer de la base de données
         db.session.delete(publication)
         db.session.commit()
 
@@ -283,18 +417,24 @@ def delete_publication(publication_id):
 
     except SQLAlchemyError as e:
         db.session.rollback()
-        current_app.logger.error(f"Erreur de base de données: {str(e)}")
+        current_app.logger.error(f"Erreur DB: {str(e)}")
         return jsonify({"error": f"Erreur de base de données: {str(e)}"}), 500
 
     except Exception as e:
-        current_app.logger.error(f"Erreur lors de la suppression complète: {str(e)}")
+        current_app.logger.error(f"Erreur suppression: {str(e)}")
         db.session.rollback()
-        return jsonify({"error": f"Erreur lors de la suppression: {str(e)}"}), 500    
+        return jsonify({"error": f"Erreur lors de la suppression: {str(e)}"}), 500
 
 
 def get_publication_stats():
     """Récupère les statistiques simples des publications"""
     current_user_id = get_jwt_identity()
+    
+    try:
+        current_user_id = int(current_user_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Token invalide"}), 401
+    
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user:
@@ -305,7 +445,6 @@ def get_publication_stats():
     else:
         base_query = Publication.query.filter_by(id_utilisateur=current_user_id)
 
-
     total_publications = base_query.count()
 
     stats_par_statut = {}
@@ -313,23 +452,21 @@ def get_publication_stats():
         count = base_query.filter_by(statut=statut).count()
         stats_par_statut[statut.value] = count
 
-    debut_semaine = datetime.now() - timedelta(days=7)
+    debut_semaine = datetime.now(timezone.utc) - timedelta(days=7)
     publications_semaine = base_query.filter(
         Publication.date_creation >= debut_semaine
     ).count()
 
-    maintenant = datetime.now()
+    maintenant = datetime.now(timezone.utc)
     publications_programmees = base_query.filter(
         Publication.statut == StatutPublicationEnum.programme,
         Publication.date_programmee >= maintenant
     ).count()
 
-
     dernieres_publications = base_query.order_by(
         Publication.date_creation.desc()
     ).limit(5).all()
 
-   
     plateforme_populaire = db.session.query(
         Publication.plateforme,
         func.count(Publication.id).label('count')
@@ -355,3 +492,72 @@ def get_publication_stats():
     }
 
     return jsonify(stats), 200
+
+
+def annuler_publication_programmee(publication_id):
+    """Annule une publication programmée"""
+    current_user_id = get_jwt_identity()
+    
+    try:
+        current_user_id = int(current_user_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Token invalide"}), 401
+    
+    current_user = Utilisateur.query.get(current_user_id)
+    if not current_user:
+        return jsonify({"error": "Utilisateur non trouvé"}), 404
+
+    publication = Publication.query.get(publication_id)
+    if not publication:
+        return jsonify({"error": "Publication introuvable"}), 404
+
+    if publication.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
+        current_app.logger.error(f"❌ ACCÈS REFUSÉ pour annulation")
+        return jsonify({
+            "error": "Non autorisé à annuler cette publication",
+            "details": "Vous ne pouvez annuler que vos propres publications"
+        }), 403
+
+    if publication.statut != StatutPublicationEnum.programme:
+        return jsonify({
+            "error": "Cette publication n'est pas programmée",
+            "statut_actuel": publication.statut.value
+        }), 400
+
+    try:
+        task_id = None
+        try:
+            task_id = (publication.parametres_publication or {}).get('task_id') or f'publication_{publication.id}'
+            if task_id and scheduler and scheduler.scheduler:
+                job = scheduler.scheduler.get_job(task_id)
+                if job:
+                    scheduler.scheduler.remove_job(task_id)
+                    current_app.logger.info(f"🗑️ Tâche supprimée: {task_id}")
+                else:
+                    current_app.logger.warning(f"⚠️ Tâche {task_id} introuvable")
+        except Exception as e:
+            current_app.logger.warning(f"⚠️ Impossible de supprimer tâche: {str(e)}")
+
+        publication.statut = StatutPublicationEnum.supprime
+        publication.date_programmee = None
+        publication.date_modification = datetime.now(timezone.utc)
+        publication.message_erreur = None
+
+        db.session.commit()
+
+        current_app.logger.info(f"✅ Publication {publication_id} annulée")
+
+        return jsonify({
+            "message": "Publication programmée annulée avec succès",
+            "publication": publication.to_dict()
+        }), 200
+
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        current_app.logger.error(f"❌ Erreur DB: {str(e)}")
+        return jsonify({"error": "Erreur de base de données", "details": str(e)}), 500
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"❌ Erreur annulation: {str(e)}")
+        return jsonify({"error": "Erreur lors de l'annulation", "details": str(e)}), 500

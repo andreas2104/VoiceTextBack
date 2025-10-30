@@ -1,15 +1,10 @@
 from flask import Blueprint, redirect, request, jsonify, current_app, make_response
 import requests
-import jwt
-import datetime
-from datetime import timezone, timedelta
 import os
-from urllib.parse import urlencode, quote, quote_plus
+from urllib.parse import urlencode, quote_plus
 from app.extensions import db
 from app.models.utilisateur import Utilisateur, TypeCompteEnum
 import secrets
-import base64
-import hashlib
 from app.services.token_service import store_token
 from flask_jwt_extended import (
     create_access_token, 
@@ -19,8 +14,7 @@ from flask_jwt_extended import (
     unset_jwt_cookies
 )
 
-# Créer UN SEUL Blueprint
-oauth_bp = Blueprint('oauth_bp', __name__, url_prefix='/api/oauth')
+oauth_bp = Blueprint('oauth_bp', __name__)
 
 # ============== CONFIGURATION ==============
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
@@ -41,7 +35,6 @@ X_AUTH_URL = "https://twitter.com/i/oauth2/authorize"
 X_TOKEN_URL = "https://api.twitter.com/2/oauth2/token"
 X_USERINFO_URL = "https://api.twitter.com/2/users/me"
 
-
 ADMIN_EMAILS = []
 admin_emails_env = os.getenv("ADMIN_EMAILS", "")
 if admin_emails_env:
@@ -50,7 +43,7 @@ if admin_emails_env:
 oauth_states = {}
 
 def cleanup_expired_states():
-
+    """Nettoie les états OAuth expirés (>10 minutes)"""
     import time
     current_time = time.time()
     expired = [k for k, v in oauth_states.items() 
@@ -58,10 +51,14 @@ def cleanup_expired_states():
     for key in expired:
         oauth_states.pop(key, None)
 
+# ============== ROUTES GOOGLE OAUTH ==============
+
+@oauth_bp.route('/login/google')
 def login_google():
     """Initier la connexion Google OAuth"""
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        return jsonify({"error": "Google OAuth not configured properly"}), 500
+        current_app.logger.error("❌ Google OAuth non configuré")
+        return jsonify({"error": "Google OAuth not configured"}), 500
     
     params = {
         "response_type": "code",
@@ -73,25 +70,29 @@ def login_google():
     }
     
     auth_url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+    current_app.logger.info(f"🔐 Redirection Google OAuth")
     return redirect(auth_url)
 
+@oauth_bp.route('/google/callback')
 def google_callback():
     """Callback Google OAuth avec cookies HttpOnly"""
     code = request.args.get('code')
     error = request.args.get('error')
     
-    frontend_success_url = f"{FRONTEND_URL}/dashboard"
+    frontend_success_url = f"{FRONTEND_URL}/authGoogleCallback"
     frontend_error_url = f"{FRONTEND_URL}/login"
     
+    current_app.logger.info("=== GOOGLE CALLBACK REÇU ===")
+    
     if error:
-        error_url = f"{frontend_error_url}?error={quote_plus(error)}&provider=google"
-        return redirect(error_url)
+        current_app.logger.error(f"❌ Erreur OAuth: {error}")
+        return redirect(f"{frontend_error_url}?error={quote_plus(error)}&provider=google")
     
     if not code:
-        error_url = f"{frontend_error_url}?error=no_code&provider=google"
-        return redirect(error_url)
+        return redirect(f"{frontend_error_url}?error=no_code&provider=google")
     
     try:
+        # Échange du code contre un token
         token_data = {
             "code": code,
             "client_id": GOOGLE_CLIENT_ID,
@@ -101,48 +102,45 @@ def google_callback():
         }
         
         token_res = requests.post(GOOGLE_TOKEN_URL, data=token_data, timeout=10)
-        token_json = token_res.json()       
+        token_json = token_res.json()
+        
         if "error" in token_json:
-            error_url = f"{frontend_error_url}?error=token_exchange_failed&provider=google"
-            return redirect(error_url)
+            current_app.logger.error(f"❌ Erreur token: {token_json}")
+            return redirect(f"{frontend_error_url}?error=token_exchange_failed&provider=google")
         
         access_token = token_json.get("access_token")
         if not access_token:
-            error_url = f"{frontend_error_url}?error=no_access_token&provider=google"
-            return redirect(error_url)
+            return redirect(f"{frontend_error_url}?error=no_access_token&provider=google")
         
-        # eto no maka information utilisateur miaraka @token
+        # Récupération des infos utilisateur
         headers = {"Authorization": f"Bearer {access_token}"}
         user_res = requests.get(GOOGLE_USERINFO_URL, headers=headers, timeout=10)
         
         if user_res.status_code != 200:
-            error_url = f"{frontend_error_url}?error=user_info_failed&provider=google"
-            return redirect(error_url)
-            
+            return redirect(f"{frontend_error_url}?error=user_info_failed&provider=google")
+        
         user_info = user_res.json()
         email = user_info.get("email", "").lower()
         
         if not email:
-            error_url = f"{frontend_error_url}?error=no_email&provider=google"
-            return redirect(error_url)
+            return redirect(f"{frontend_error_url}?error=no_email&provider=google")
         
         if not user_info.get("verified_email", False):
-            error_url = f"{frontend_error_url}?error=email_not_verified&provider=google"
-            return redirect(error_url)
+            return redirect(f"{frontend_error_url}?error=email_not_verified&provider=google")
         
+        # Gestion de l'utilisateur
         is_admin = email in ADMIN_EMAILS
         utilisateur = Utilisateur.query.filter_by(email=email).first()
+        
         if not utilisateur:
             try:
                 full_name = user_info.get("name", "")
                 name_parts = full_name.split(' ', 1) if full_name else ["", ""]
-                prenom = name_parts[0] if len(name_parts) > 0 else ""
-                nom = name_parts[1] if len(name_parts) > 1 else ""
                 
                 utilisateur = Utilisateur(
                     email=email,
-                    nom=nom,
-                    prenom=prenom,
+                    nom=name_parts[1] if len(name_parts) > 1 else "",
+                    prenom=name_parts[0] if len(name_parts) > 0 else "",
                     photo=user_info.get("picture"),
                     type_compte=TypeCompteEnum.admin if is_admin else TypeCompteEnum.user,
                     mot_de_passe=None,
@@ -151,87 +149,88 @@ def google_callback():
                 
                 db.session.add(utilisateur)
                 db.session.commit()
+                current_app.logger.info(f"✅ Nouvel utilisateur Google: {email}")
                 
-                if is_admin:
-                    current_app.logger.info(f"Nouveau compte admin créé pour: {email}")
-                    
             except Exception as e:
                 db.session.rollback()
-                current_app.logger.error(f"Erreur création utilisateur {email}: {str(e)}")
-                error_url = f"{frontend_error_url}?error=database_error&provider=google"
-                return redirect(error_url)
+                current_app.logger.error(f"❌ Erreur création utilisateur: {str(e)}")
+                return redirect(f"{frontend_error_url}?error=database_error&provider=google")
         else:
-            try:
-                if user_info.get("picture") and utilisateur.photo != user_info.get("picture"):
-                    utilisateur.photo = user_info.get("picture")
-                
-                if is_admin and utilisateur.type_compte != TypeCompteEnum.admin:
-                    utilisateur.type_compte = TypeCompteEnum.admin
-                    current_app.logger.info(f"Utilisateur {email} promu admin")
-                
-                db.session.commit()
-                
-            except Exception as e:
-                db.session.rollback()
-                current_app.logger.error(f"Erreur mise à jour utilisateur {email}: {str(e)}")
-        try: 
-               # stockage token dans db------------------------
-            store_token (
-                utilisateur_id= utilisateur.id,
+            # Mise à jour des infos
+            if user_info.get("picture") and utilisateur.photo != user_info.get("picture"):
+                utilisateur.photo = user_info.get("picture")
+            
+            if is_admin and utilisateur.type_compte != TypeCompteEnum.admin:
+                utilisateur.type_compte = TypeCompteEnum.admin
+                current_app.logger.info(f"✅ Utilisateur promu admin: {email}")
+            
+            db.session.commit()
+        
+        # Stockage du token OAuth
+        try:
+            store_token(
+                utilisateur_id=utilisateur.id,
                 provider='google',
                 access_token=token_json.get('access_token'),
                 refresh_token=token_json.get('refresh_token'),
                 expires_in=token_json.get('expires_in', 3600),
             )
-            current_app.logger.info(f"Token Google stocker pour l'utilisateur {utilisateur.id}")
+            current_app.logger.info(f"✅ Token Google stocké pour utilisateur {utilisateur.id}")
         except Exception as e:
-            current_app.logger.error(f"Erreur stockage token Google: {str(e)}")
-                # jusq ici---------------    
-
-                # manamboatra token eto 
+            current_app.logger.error(f"⚠️ Erreur stockage token: {str(e)}")
+        
+        # ✅CRÉATION DES JWT COMME DANS auth_routes.py
         access_token_jwt = create_access_token(
-            identity=utilisateur.id,
+            identity=str(utilisateur.id), 
             additional_claims={
                 'email': utilisateur.email,
                 'type_compte': utilisateur.type_compte.value
             }
         )
-        refresh_token_jwt = create_refresh_token(identity=utilisateur.id)
-        response = redirect(frontend_success_url)
+        refresh_token_jwt = create_refresh_token(identity=str(utilisateur.id))
+        
+        #  Utiliser make_response + redirect (pas juste redirect)
+        response = make_response(redirect(frontend_success_url))
+        
         set_access_cookies(response, access_token_jwt)
         set_refresh_cookies(response, refresh_token_jwt)
-        current_app.logger.info(f"Cookies JWT définis pour {utilisateur.email}")
+        
+        current_app.logger.info(f"✅ Cookies JWT définis pour {utilisateur.email}")
+        current_app.logger.info(f"🍪 Set-Cookie headers: {response.headers.getlist('Set-Cookie')}")
+        
         return response
         
     except requests.exceptions.RequestException as e:
-        current_app.logger.error(f"Erreur réseau OAuth: {str(e)}")
-        error_url = f"{frontend_error_url}?error=network_error&provider=google"
-        return redirect(error_url)
+        current_app.logger.error(f"❌ Erreur réseau: {str(e)}")
+        return redirect(f"{frontend_error_url}?error=network_error&provider=google")
     except Exception as e:
-        current_app.logger.error(f"Erreur inattendue OAuth: {str(e)}")
-        error_url = f"{frontend_error_url}?error=unexpected_error&provider=google"
-        return redirect(error_url)
+        current_app.logger.error(f"❌ Erreur inattendue: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return redirect(f"{frontend_error_url}?error=unexpected_error&provider=google")
 
+# ============== ROUTES X/TWITTER OAUTH ==============
 
+@oauth_bp.route('/login/x')
 def login_x():
     """Initier la connexion X/Twitter OAuth"""
     if not X_CLIENT_ID or not X_CLIENT_SECRET:
+        current_app.logger.error("❌ X OAuth non configuré")
         return redirect(f"{FRONTEND_URL}/login?error=x_not_configured")
     
     try:
-       
         cleanup_expired_states()
-           
+        
         state = secrets.token_urlsafe(32)
         code_verifier = secrets.token_urlsafe(43)
-
+        
         import time
         oauth_states[state] = {
             'verifier': code_verifier,
             'timestamp': time.time()
         }
         
-        current_app.logger.info(f"[X OAuth] State créé: {state[:10]}... (total states: {len(oauth_states)})")
+        current_app.logger.info(f"🔐 État X créé: {state[:10]}...")
         
         params = {
             'response_type': 'code',
@@ -247,44 +246,38 @@ def login_x():
         return redirect(auth_url)
         
     except Exception as e:
-        current_app.logger.error(f"Erreur login X: {str(e)}")
+        current_app.logger.error(f"❌ Erreur login X: {str(e)}")
         import traceback
         traceback.print_exc()
         return redirect(f"{FRONTEND_URL}/login?error=x_init_failed")
 
-
+@oauth_bp.route('/x/callback')
 def x_callback():
     """Callback X/Twitter OAuth avec cookies HttpOnly"""
     code = request.args.get('code')
     received_state = request.args.get('state')
     error = request.args.get('error')
     
-    frontend_success_url = f"{FRONTEND_URL}/dashboard"
+    frontend_success_url = f"{FRONTEND_URL}/authXCallback"
     frontend_error_url = f"{FRONTEND_URL}/login"
     
-    current_app.logger.info(f"[X Callback] Reçu - Code: {'présent' if code else 'absent'}, State: {received_state[:10] if received_state else 'None'}...")
+    current_app.logger.info("=== X CALLBACK REÇU ===")
     
     if error:
-        current_app.logger.error(f"Erreur OAuth X: {error}")
+        current_app.logger.error(f"❌ Erreur OAuth: {error}")
         return redirect(f"{frontend_error_url}?error=auth_denied&provider=x")
     
-    if not code:
+    if not code or not received_state:
         return redirect(f"{frontend_error_url}?error=no_code&provider=x")
-    
-    if not received_state:
-        return redirect(f"{frontend_error_url}?error=no_state&provider=x")
     
     # Vérification du state
     state_data = oauth_states.get(received_state)
-    
     if not state_data:
-        current_app.logger.error(f"State introuvable: {received_state[:10]}...")
+        current_app.logger.error(f"❌ State invalide: {received_state[:10]}...")
         return redirect(f"{frontend_error_url}?error=invalid_state&provider=x")
     
     code_verifier = state_data['verifier']
     oauth_states.pop(received_state, None)
-    
-    current_app.logger.info(f"[X Callback] State validé et supprimé")
     
     try:
         # Échange du code contre un token
@@ -296,13 +289,10 @@ def x_callback():
             "code_verifier": code_verifier
         }
         
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        
-        current_app.logger.info("[X Callback] Échange du code contre un token...")
         token_res = requests.post(
             X_TOKEN_URL,
             data=token_data,
-            headers=headers,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
             auth=(X_CLIENT_ID, X_CLIENT_SECRET),
             timeout=10
         )
@@ -310,34 +300,27 @@ def x_callback():
         token_json = token_res.json()
         
         if "error" in token_json or token_res.status_code != 200:
-            current_app.logger.error(f"Erreur token X (status {token_res.status_code}): {token_json}")
+            current_app.logger.error(f"❌ Erreur token X: {token_json}")
             return redirect(f"{frontend_error_url}?error=token_exchange_failed&provider=x")
         
         access_token = token_json.get("access_token")
         if not access_token:
             return redirect(f"{frontend_error_url}?error=no_access_token&provider=x")
         
-        current_app.logger.info("[X Callback] Token obtenu, récupération des infos utilisateur...")
-        
         # Récupération des infos utilisateur
-        headers = {"Authorization": f"Bearer {access_token}"}
-        params = {"user.fields": "id,name,username,profile_image_url"}
-        
         user_res = requests.get(
             X_USERINFO_URL,
-            headers=headers,
-            params=params,
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"user.fields": "id,name,username,profile_image_url"},
             timeout=10
         )
         
-        if user_res.status_code == 429:
-            current_app.logger.error("Rate limit X atteint")
-            return redirect(f"{frontend_error_url}?error=rate_limit_exceeded&provider=x")
+        if user_res.status_code != 200:
+            current_app.logger.error(f"❌ Erreur user info X: {user_res.status_code}")
+            return redirect(f"{frontend_error_url}?error=user_info_failed&provider=x")
         
         user_info = user_res.json()
-        
         if "data" not in user_info:
-            current_app.logger.error(f"Erreur user info X (status {user_res.status_code}): {user_info}")
             return redirect(f"{frontend_error_url}?error=user_info_failed&provider=x")
         
         twitter_user = user_info["data"]
@@ -345,97 +328,92 @@ def x_callback():
         username = twitter_user.get("username")
         name = twitter_user.get("name", username)
         
-        current_app.logger.info(f"[X Callback] Utilisateur X: @{username} (ID: {twitter_id})")
+        current_app.logger.info(f"✅ Utilisateur X: @{username}")
         
         # Gestion de l'utilisateur
         email = f"x_{twitter_id}@twitter.oauth"
-        
         utilisateur = Utilisateur.query.filter_by(email=email).first()
+        
         if not utilisateur:
             utilisateur = Utilisateur(
                 email=email,
                 nom=name,
                 prenom="",
                 mot_de_passe=None,
+                photo=twitter_user.get("profile_image_url"),
                 type_compte=TypeCompteEnum.user,
                 actif=True
             )
             db.session.add(utilisateur)
             db.session.commit()
-            current_app.logger.info(f"Nouvel utilisateur X créé: {username}")
+            current_app.logger.info(f"✅ Nouvel utilisateur X: @{username}")
         else:
             if utilisateur.nom != name:
                 utilisateur.nom = name
                 db.session.commit()
-            current_app.logger.info(f"Utilisateur X existant: {username}")
         
-        # Stockage du token
+      
         try:
             store_token(
                 utilisateur_id=utilisateur.id,
                 provider='x',
-                access_token=token_json.get('access_token'),
+                access_token=access_token,
                 refresh_token=token_json.get('refresh_token'),
                 expires_in=token_json.get('expires_in', 3600),
             )
-            current_app.logger.info(f"Token X stocké pour l'utilisateur {utilisateur.id}")
+            current_app.logger.info(f"✅ Token X stocké pour utilisateur {utilisateur.id}")
         except Exception as e:
-            current_app.logger.error(f"Erreur stockage token X: {str(e)}")
-            # On continue même si le stockage du token échoue
+            current_app.logger.error(f"⚠️ Erreur stockage token: {str(e)}")
         
-        # Création des tokens JWT
+        
         access_token_jwt = create_access_token(
-            identity=utilisateur.id,
+            identity=str(utilisateur.id), 
             additional_claims={
                 'email': utilisateur.email,
                 'type_compte': utilisateur.type_compte.value,
-                'username': username,
-                'x_access_token': access_token
+                'username': username
             }
         )
-        refresh_token_jwt = create_refresh_token(identity=utilisateur.id)
+        refresh_token_jwt = create_refresh_token(identity=str(utilisateur.id))
         
-        # Préparation de la réponse
-        response = redirect(frontend_success_url)
+        
+        response = make_response(redirect(frontend_success_url))
         
         set_access_cookies(response, access_token_jwt)
         set_refresh_cookies(response, refresh_token_jwt)
         
-        current_app.logger.info(f"=== CALLBACK X RÉUSSI ===")
-        current_app.logger.info(f"Utilisateur: @{username} - Redirection vers dashboard")
-        current_app.logger.info(f"Cookies JWT définis pour @{username}")
+        current_app.logger.info(f"✅ Cookies JWT définis pour @{username}")
+        current_app.logger.info(f"🍪 Set-Cookie headers: {response.headers.getlist('Set-Cookie')}")
         
         return response
         
     except requests.exceptions.Timeout:
-        current_app.logger.error("Timeout X OAuth")
+        current_app.logger.error("❌ Timeout X OAuth")
         return redirect(f"{frontend_error_url}?error=timeout&provider=x")
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Erreur inattendue X OAuth: {str(e)}")
+        current_app.logger.error(f"❌ Erreur inattendue X: {str(e)}")
         import traceback
         traceback.print_exc()
         return redirect(f"{frontend_error_url}?error=server_error&provider=x")
 
+
+@oauth_bp.route('/logout', methods=['POST'])
 def oauth_logout():
-    """Déconnexion OAuth - supprime les cookies HttpOnly"""
+    """Déconnexion OAuth"""
     try:
-        response = jsonify({"message": "Déconnexion OAuth réussie"})
+        response = make_response(jsonify({"message": "Déconnexion réussie"}), 200)
         unset_jwt_cookies(response)
-        return response, 200
+        return response
     except Exception as e:
-        current_app.logger.error(f"Erreur déconnexion OAuth: {str(e)}")
+        current_app.logger.error(f"❌ Erreur déconnexion: {str(e)}")
         return jsonify({"error": "Erreur lors de la déconnexion"}), 500
 
-
-
+@oauth_bp.route('/debug/x')
 def x_debug():
-    """Vérifier la configuration X OAuth"""
+    """Debug X OAuth"""
     return jsonify({
         "configured": bool(X_CLIENT_ID and X_CLIENT_SECRET),
-        "client_id_present": bool(X_CLIENT_ID),
-        "client_id_length": len(X_CLIENT_ID) if X_CLIENT_ID else 0,
         "redirect_uri": X_REDIRECT_URI,
-        "active_states": len(oauth_states),
-        "state_keys": list(oauth_states.keys())[:3] if oauth_states else []
+        "active_states": len(oauth_states)
     })

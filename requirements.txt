@@ -167,3 +167,4 @@ zipp==1.0.0
 azure-ai-inference==1.0.0b9
 azure-core==1.35.0
 isodate==0.7.2
+APScheduler==3.10.4

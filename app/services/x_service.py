@@ -179,3 +179,55 @@ def delete_publication_from_x(tweet_id, access_token):
     except requests.exceptions.RequestException as e:
         current_app.logger.error(f"Erreur réseau lors de la suppression du tweet: {str(e)}")
         return False, f"Erreur réseau: {str(e)}"
+
+def get_tweet_metrics(tweet_id, access_token):
+    """
+    Récupère les métriques d'un tweet (vues, likes, retweets)
+    
+    Args:
+        tweet_id (str): ID du tweet
+        access_token (str): Token d'accès OAuth2
+    
+    Returns:
+        dict: {'views': int, 'likes': int, 'retweets': int} ou None
+    """
+    try:
+        url = f"https://api.x.com/2/tweets/{tweet_id}"
+        headers = {
+            "Authorization": f"Bearer {access_token}"
+        }
+        
+        # Demander les métriques publiques et non-publiques
+        params = {
+            "tweet.fields": "public_metrics,non_public_metrics,organic_metrics"
+        }
+        
+        current_app.logger.info(f"Récupération des métriques du tweet: {tweet_id}")
+        
+        response = requests.get(url, headers=headers, params=params, timeout=20)
+        
+        if response.status_code != 200:
+            error_detail = response.json().get('detail', response.text)
+            current_app.logger.error(f"Erreur récupération métriques: {response.status_code} - {error_detail}")
+            return None
+        
+        tweet_data = response.json()
+        metrics = tweet_data.get('data', {}).get('public_metrics', {})
+        
+        # Tentative de récupérer les vues (organic_metrics pour les tweets standards)
+        organic_metrics = tweet_data.get('data', {}).get('organic_metrics', {})
+        
+        return {
+            'views': organic_metrics.get('impression_count', 0),
+            'likes': metrics.get('like_count', 0),
+            'retweets': metrics.get('retweet_count', 0),
+            'replies': metrics.get('reply_count', 0),
+            'quotes': metrics.get('quote_count', 0)
+        }
+        
+    except requests.exceptions.RequestException as e:
+        current_app.logger.error(f"Erreur réseau récupération métriques: {str(e)}")
+        return None
+    except Exception as e:
+        current_app.logger.error(f"Erreur inattendue récupération métriques: {str(e)}")
+        return None

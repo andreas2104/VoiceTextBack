@@ -34,3 +34,9 @@ def delete_publication(publication_id):
 @jwt_required()
 def get_publication_stats():
     return publication_controller.get_publication_stats()
+
+
+@publication_bp.route("/<int:publication_id>/annuler", methods=["POST"])
+@jwt_required()
+def annuler_publication(publication_id):
+    return publication_controller.annuler_publication_programmee(publication_id)

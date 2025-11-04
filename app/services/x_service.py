@@ -180,9 +180,10 @@ def delete_publication_from_x(tweet_id, access_token):
         current_app.logger.error(f"Erreur réseau lors de la suppression du tweet: {str(e)}")
         return False, f"Erreur réseau: {str(e)}"
 
+
 def get_tweet_metrics(tweet_id, access_token):
     """
-    Récupère les métriques d'un tweet (vues, likes, retweets)
+    Récupère les métriques d'un tweet avec plusieurs tentatives
     
     Args:
         tweet_id (str): ID du tweet
@@ -190,6 +191,9 @@ def get_tweet_metrics(tweet_id, access_token):
     
     Returns:
         dict: {'views': int, 'likes': int, 'retweets': int} ou None
+    
+    IMPORTANT: Les impressions (vues) nécessitent OAuth 1.0a avec l'accès au compte propriétaire.
+    Avec OAuth 2.0, seules les métriques publiques sont disponibles (likes, RT, replies, quotes).
     """
     try:
         url = f"https://api.x.com/2/tweets/{tweet_id}"
@@ -197,37 +201,100 @@ def get_tweet_metrics(tweet_id, access_token):
             "Authorization": f"Bearer {access_token}"
         }
         
-        # Demander les métriques publiques et non-publiques
+        # Demander TOUS les champs de métriques disponibles
         params = {
-            "tweet.fields": "public_metrics,non_public_metrics,organic_metrics"
+            "tweet.fields": "public_metrics,non_public_metrics,organic_metrics,promoted_metrics"
         }
         
-        current_app.logger.info(f"Récupération des métriques du tweet: {tweet_id}")
+        current_app.logger.info(f"📊 Récupération des métriques du tweet: {tweet_id}")
         
         response = requests.get(url, headers=headers, params=params, timeout=20)
         
         if response.status_code != 200:
-            error_detail = response.json().get('detail', response.text)
-            current_app.logger.error(f"Erreur récupération métriques: {response.status_code} - {error_detail}")
+            try:
+                error_detail = response.json().get('detail', response.text)
+            except:
+                error_detail = response.text
+            current_app.logger.error(f"❌ Erreur récupération métriques: {response.status_code} - {error_detail}")
+            
+            # Si erreur 403, c'est probablement un problème de permissions
+            if response.status_code == 403:
+                current_app.logger.warning(
+                    " Erreur 403: Les métriques étendues nécessitent OAuth 1.0a "
+                    "ou un accès élevé à l'API. Seules les métriques publiques sont disponibles."
+                )
+            
             return None
         
         tweet_data = response.json()
-        metrics = tweet_data.get('data', {}).get('public_metrics', {})
+        data = tweet_data.get('data', {})
         
-        # Tentative de récupérer les vues (organic_metrics pour les tweets standards)
-        organic_metrics = tweet_data.get('data', {}).get('organic_metrics', {})
+        # Essayer différentes sources de métriques
+        public_metrics = data.get('public_metrics', {})
+        organic_metrics = data.get('organic_metrics', {})
+        non_public_metrics = data.get('non_public_metrics', {})
+        promoted_metrics = data.get('promoted_metrics', {})
         
-        return {
-            'views': organic_metrics.get('impression_count', 0),
-            'likes': metrics.get('like_count', 0),
-            'retweets': metrics.get('retweet_count', 0),
-            'replies': metrics.get('reply_count', 0),
-            'quotes': metrics.get('quote_count', 0)
+        # Log pour debug
+        current_app.logger.debug(f"📊 Métriques disponibles pour {tweet_id}:")
+        current_app.logger.debug(f"   - public_metrics: {public_metrics}")
+        if organic_metrics:
+            current_app.logger.debug(f"   - organic_metrics: {organic_metrics}")
+        if non_public_metrics:
+            current_app.logger.debug(f"   - non_public_metrics: {non_public_metrics}")
+        if promoted_metrics:
+            current_app.logger.debug(f"   - promoted_metrics: {promoted_metrics}")
+        
+        # Impressions: essayer plusieurs sources (ordre de préférence)
+        views = 0
+        
+        # 1. Organic metrics (meilleure source)
+        if organic_metrics and 'impression_count' in organic_metrics:
+            views = organic_metrics.get('impression_count', 0)
+            current_app.logger.debug(f"   ✓ Vues depuis organic_metrics: {views}")
+        
+        # 2. Non-public metrics
+        elif non_public_metrics and 'impression_count' in non_public_metrics:
+            views = non_public_metrics.get('impression_count', 0)
+            current_app.logger.debug(f"   ✓ Vues depuis non_public_metrics: {views}")
+        
+        # 3. Promoted metrics
+        elif promoted_metrics and 'impression_count' in promoted_metrics:
+            views = promoted_metrics.get('impression_count', 0)
+            current_app.logger.debug(f"   ✓ Vues depuis promoted_metrics: {views}")
+        
+        # 4. Public metrics (peu probable)
+        elif public_metrics and 'impression_count' in public_metrics:
+            views = public_metrics.get('impression_count', 0)
+            current_app.logger.debug(f"   ✓ Vues depuis public_metrics: {views}")
+        
+        else:
+            current_app.logger.warning(
+                f"⚠️ Aucune métrique d'impression disponible pour {tweet_id}. "
+                "Cela est normal avec OAuth 2.0 Basic Access. "
+                "Pour obtenir les impressions, vous devez utiliser OAuth 1.0a."
+            )
+        
+        result = {
+            'views': views,
+            'likes': public_metrics.get('like_count', 0),
+            'retweets': public_metrics.get('retweet_count', 0),
+            'replies': public_metrics.get('reply_count', 0),
+            'quotes': public_metrics.get('quote_count', 0),
+            'bookmarks': public_metrics.get('bookmark_count', 0)
         }
         
+        current_app.logger.info(
+            f"✅ Métriques récupérées pour {tweet_id}: "
+            f"{result['views']} vues, {result['likes']} likes, "
+            f"{result['retweets']} RT, {result['quotes']} quotes"
+        )
+        
+        return result
+        
     except requests.exceptions.RequestException as e:
-        current_app.logger.error(f"Erreur réseau récupération métriques: {str(e)}")
+        current_app.logger.error(f"❌ Erreur réseau récupération métriques: {str(e)}")
         return None
     except Exception as e:
-        current_app.logger.error(f"Erreur inattendue récupération métriques: {str(e)}")
+        current_app.logger.error(f"❌ Erreur inattendue récupération métriques: {str(e)}", exc_info=True)
         return None

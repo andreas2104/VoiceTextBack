@@ -39,7 +39,7 @@ def register():
         db.session.commit()
         
         access_token = create_access_token(
-            identity=str(new_utilisateur.id),  # ✅ Convert to string
+            identity=new_utilisateur.id,  
             additional_claims={
                 'email': new_utilisateur.email,
                 'type_compte': new_utilisateur.type_compte.value
@@ -47,7 +47,6 @@ def register():
         )
         refresh_token = create_refresh_token(identity=str(new_utilisateur.id))
 
-        # ✅ Use make_response
         response = make_response(jsonify({
             "message": "Inscription réussie",
             "utilisateur": {
@@ -62,14 +61,14 @@ def register():
         set_access_cookies(response, access_token)
         set_refresh_cookies(response, refresh_token)
         
-        print(f"✅ Registration successful for {new_utilisateur.email}")
-        print(f"✅ Cookies set: access_token, refresh_token")
+        print(f" Registration successful for {new_utilisateur.email}")
+        print(f" Cookies set: access_token, refresh_token")
         
         return response
         
     except Exception as e:
         db.session.rollback()
-        print(f"❌ Registration error: {str(e)}")
+        print(f" Registration error: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -95,15 +94,14 @@ def login():
             db.session.commit()
 
     access_token = create_access_token(
-        identity=str(utilisateur.id),  # ✅ Convert to string
+        identity=utilisateur.id,  
         additional_claims={
             'email': utilisateur.email,
             'type_compte': utilisateur.type_compte.value
         }
     )
-    refresh_token = create_refresh_token(identity=str(utilisateur.id))
+    refresh_token = create_refresh_token(identity=utilisateur.id)
 
-    #  Use make_response with status code
     response = make_response(jsonify({
         "message": "Connexion réussie",
         "utilisateur": {
@@ -162,7 +160,7 @@ def refresh():
             return jsonify({"error": "User not found"}), 404
         
         new_access_token = create_access_token(
-            identity=str(current_user_id),
+            identity=current_user_id,
             additional_claims={
                 'email': utilisateur.email,
                 'type_compte': utilisateur.type_compte.value
@@ -179,13 +177,13 @@ def refresh():
     except Exception as e:
         print(f" Refresh error: {str(e)}")
         import traceback
-        traceback.print_exc()  # Print full error trace
+        traceback.print_exc()  
         return jsonify({"error": str(e)}), 401
 
 
 def logout():
     try:
-        # ✅ Use make_response
+    
         response = make_response(jsonify({"message": "Déconnexion réussie"}), 200)
         unset_jwt_cookies(response)
         
@@ -194,5 +192,5 @@ def logout():
         return response
         
     except Exception as e:
-        print(f"❌ Logout error: {str(e)}")
+        print(f"Logout error: {str(e)}")
         return jsonify({"error": str(e)}), 500

@@ -2,67 +2,109 @@ from flask import request, jsonify
 from app.extensions import db
 from app.models.contenu import Contenu, TypeContenuEnum
 from app.models.prompt import Prompt
-from app.models.modelIA import ModelIA, TypeModelEnum
+from app.models.modelIA import ModelIA
 from app.models.template import Template
 from app.models.utilisateur import Utilisateur, TypeCompteEnum
 from flask_jwt_extended import get_jwt_identity
 from datetime import datetime
-from gpt4all import GPT4All
 from sqlalchemy.exc import SQLAlchemyError
 import requests
 import os
 import base64
+import time
+import re
+import uuid
+from typing import Optional
 
 
-_gpt4all_instance = None
 
-def get_gpt4all_instance():
-    global _gpt4all_instance
-    if _gpt4all_instance is None:
-        model_path = os.path.expanduser("~/.cache/gpt4all/")
-        model_file = "orca-mini-3b-gguf2-q4_0.gguf"
-        full_path = os.path.join(model_path, model_file)
+UPLOAD_FOLDER = os.path.join(os.getcwd(), 'app', 'uploads', 'images')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+
+def save_base64_image(base64_string: str, user_id: int) -> str:
+    try:
+        if base64_string.startswith('data:image/'):
+            header, base64_data = base64_string.split(',', 1)
+            mime_type = header.split(':')[1].split(';')[0]
+            extension = mime_type.split('/')[1]
+        else:
+            base64_data = base64_string
+            extension = 'png'
         
-        if not os.path.exists(full_path):
-            return {"type": "error", "content": f"Modèle GPT4All non trouvé à {full_path}"}
+        filename = f"{user_id}_{uuid.uuid4().hex}.{extension}"
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
         
-        _gpt4all_instance = GPT4All(
-            model_name=model_file,
-            model_path=model_path,
-            allow_download=False, 
-            device='cpu'  
-        )
-        print(f"✅ Modèle GPT4All chargé : {full_path}")
-    return _gpt4all_instance
+        image_data = base64.b64decode(base64_data)
+        with open(filepath, 'wb') as f:
+            f.write(image_data)
+        
+        print(f" Image sauvegardée: {filename}")
+        return f"/uploads/images/{filename}"
+    except Exception as e:
+        print(f" Erreur sauvegarde image: {str(e)}")
+        raise
+
+
+def delete_image_file(image_url: str):
+    if not image_url or not image_url.startswith('/uploads/'):
+        return
+    
+    try:
+        filename = image_url.split('/')[-1]
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            print(f"Image supprimée: {filename}")
+    except Exception as e:
+        print(f" Erreur suppression: {str(e)}")
+
+
+def is_valid_base64_image(content: str) -> bool:
+    if content.startswith("data:image/"):
+        try:
+            _, base64_data = content.split(",", 1)
+            base64.b64decode(base64_data, validate=True)
+            return True
+        except Exception:
+            return False
+    
+    try:
+        base64.b64decode(content, validate=True)
+        return len(content) > 100
+    except Exception:
+        return False
+
+
+def extract_image_from_markdown(content: str) -> Optional[str]:
+ 
+    patterns = [
+        r'!\[.*?\]\((data:image/[^)]+)\)',
+        r'\[.*?\]\((data:image/[^)]+)\)',
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, content)
+        if match:
+            return match.group(1)
+    return None
 
 
 def get_api_key(fournisseur: str):
     """Récupère la clé API selon le fournisseur"""
     api_keys = {
-        "gpt": "API_KEY_OPENAI",
-        "gpt3": "API_KEY_OPENAI", 
-        "openai": "API_KEY_OPENAI",
-        "grok": "API_KEY_GROK",
-        "groq": "API_KEY_GROQ",
-        "gemini": "API_KEY_GEMINI",
-        "deepseek": "API_KEY_DEEPSEEK",
-        "openrouter": "API_KEY_OPEN_ROUTER"
+        "gpt": "COMET_API_KEY",
+        "gemini": "COMET_API_KEY",
+        "gemini_flash": "COMET_API_KEY",
     }
     return os.getenv(api_keys.get(fournisseur.lower()))
 
 
 def prepare_multimodal_content(prompt_text: str, images: list = None):
-    """
-    Prépare le contenu multimodal pour l'API
-    images: liste de dictionnaires avec {url: str} ou {base64: str, mime_type: str}
-    """
-    content = []
+    """Prépare le payload multimodal pour l'API"""
+    content = [{"type": "text", "text": prompt_text}] if prompt_text else []
     
-    # Ajouter le texte
-    if prompt_text:
-        content.append({"type": "text", "text": prompt_text})
-    
-    # Ajouter les images
     if images:
         for img in images:
             if "url" in img:
@@ -80,67 +122,20 @@ def prepare_multimodal_content(prompt_text: str, images: list = None):
     return content
 
 
-def detect_content_type(model: ModelIA, prompt_text: str, has_images: bool = False):
-    """Détecte le type de contenu à générer"""
-    # Si le modèle est multimodal et qu'il y a des images en entrée
-    if model.type_model == TypeModelEnum.multimodal and has_images:
-        return TypeContenuEnum.multimodal
-    
-    # Détection via mots-clés pour images
-    keywords_image = ["image", "photo", "dessin", "illustration", "art", "génère une image"]
-    if any(word in prompt_text.lower() for word in keywords_image):
-        return TypeContenuEnum.image
-    
-    return TypeContenuEnum.text
-
-
-def call_gpt4all(prompt_text, temperature=0.7, max_tokens=512):
-    """Appel vers GPT4All local (texte uniquement)"""
-    try:
-        llm = get_gpt4all_instance()
-        with llm.chat_session():
-            response = llm.generate(prompt_text, max_tokens=max_tokens, temp=temperature)
-        return {"type": "text", "content": response}
-    except Exception as e:
-        return {"type": "error", "content": f"Erreur GPT4All: {str(e)}"}
-
-
-def call_openai_multimodal(prompt_text, api_key, model_name="gpt-4-vision-preview", 
-                           temperature=0.7, max_tokens=512, images=None):
-    """Appel vers l'API OpenAI avec support multimodal"""
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    
-    # Préparer le contenu multimodal
-    content = prepare_multimodal_content(prompt_text, images)
-    
-    payload = {
-        "model": model_name,
-        "messages": [{"role": "user", "content": content}],
-        "temperature": temperature,
-        "max_tokens": max_tokens
+def call_gpt_api(prompt_text, api_key, model_name="gpt-3.5-turbo", 
+                 temperature=0.7, max_tokens=512):
+    url = "https://api.cometapi.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
     }
-    
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=90)
-        response.raise_for_status()
-        data = response.json()
-        return {"type": "text", "content": data["choices"][0]["message"]["content"]}
-    except Exception as e:
-        return {"type": "error", "content": f"Erreur OpenAI Multimodal: {str(e)}"}
-
-
-def call_openai_api(prompt_text, api_key, model_name="gpt-3.5-turbo", 
-                    temperature=0.7, max_tokens=512):
-    """Appel vers l'API OpenAI (texte uniquement)"""
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
         "model": model_name,
         "messages": [{"role": "user", "content": prompt_text}],
         "temperature": temperature,
         "max_tokens": max_tokens
     }
+    
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=60)
         response.raise_for_status()
@@ -150,111 +145,109 @@ def call_openai_api(prompt_text, api_key, model_name="gpt-3.5-turbo",
         return {"type": "error", "content": f"Erreur OpenAI: {str(e)}"}
 
 
-def call_gemini_multimodal(prompt_text, api_key, model_name="gemini-pro-vision",
-                           temperature=0.7, max_tokens=512, images=None):
-    """Appel vers l'API Gemini avec support multimodal"""
-    url = f"https://generativelanguage.googleapis.com/v1/models/{model_name}:generateContent?key={api_key}"
-    headers = {"Content-Type": "application/json"}
-    
-    # Préparer les parties du contenu
-    parts = [{"text": prompt_text}]
-    
-    if images:
-        for img in images:
-            if "base64" in img:
-                parts.append({
-                    "inline_data": {
-                        "mime_type": img.get("mime_type", "image/jpeg"),
-                        "data": img["base64"]
-                    }
-                })
-            elif "url" in img:
-                # Gemini nécessite base64, donc télécharger l'image
-                try:
-                    img_response = requests.get(img["url"], timeout=30)
-                    img_response.raise_for_status()
-                    img_base64 = base64.b64encode(img_response.content).decode('utf-8')
-                    parts.append({
-                        "inline_data": {
-                            "mime_type": img_response.headers.get("content-type", "image/jpeg"),
-                            "data": img_base64
-                        }
-                    })
-                except Exception as e:
-                    print(f"Erreur téléchargement image: {e}")
-    
-    payload = {
-        "contents": [{"parts": parts}],
-        "generationConfig": {
-            "temperature": temperature,
-            "maxOutputTokens": max_tokens
-        }
+def call_gemini_api(prompt_text, api_key, model_name="gemini-2.0-flash-exp",
+                    temperature=0.7, max_tokens=512, images=None):
+    """Appel API Gemini via Comet avec retry + détection image"""
+    url = 'https://api.cometapi.com/v1/chat/completions'
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
     }
     
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=90)
-        response.raise_for_status()
-        data = response.json()
-        return {"type": "text", "content": data["candidates"][0]["content"]["parts"][0]["text"]}
-    except Exception as e:
-        return {"type": "error", "content": f"Erreur Gemini: {str(e)}"}
-
-
-def call_grok(prompt_text, api_key, temperature=0.7, max_tokens=512):
-    """Appel vers l'API Grok"""
-    url = "https://api.x.ai/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    if images and len(images) > 0:
+        content = prepare_multimodal_content(prompt_text, images)
+        messages = [{"role": "user", "content": content}]
+    else:
+        messages = [{"role": "user", "content": prompt_text}]
+    
     payload = {
-        "model": "grok-beta",
-        "messages": [{"role": "user", "content": prompt_text}],
+        "model": model_name,
+        "messages": messages,
         "temperature": temperature,
-        "max_tokens": max_tokens
+        "max_tokens": max_tokens,
+        "stream": False
     }
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
-        response.raise_for_status()
-        data = response.json()
-        return {"type": "text", "content": data["choices"][0]["message"]["content"]}
-    except Exception as e:
-        return {"type": "error", "content": f"Erreur Grok: {str(e)}"}
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            print(f" Tentative {attempt + 1}/{max_retries} - {model_name}")
+            
+            response = requests.post(url, headers=headers, json=payload, timeout=60)
+            
+            if not response.text or response.text.strip() == "":
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    print(f"⏳ Réponse vide, retry dans {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                return {'type': 'error', 'content': 'Réponse vide de l\'API Gemini'}
+            
+            response.raise_for_status()
+            data = response.json()
+            content = data["choices"][0]["message"]["content"]
+            
+        
+            markdown_image = extract_image_from_markdown(content)
+            if markdown_image:
+                print(f" Image markdown détectée")
+                return {"type": "image", "content": markdown_image}
+            
+            if content.startswith("data:image/"):
+                print(f" Data URI détectée")
+                return {"type": "image", "content": content}
+            
+            if len(content) > 50000 and is_valid_base64_image(content):
+                print(f" Image base64 brute détectée")
+                return {"type": "image", "content": f"data:image/png;base64,{content}"}
+            
+            if content.startswith("http") and any(ext in content.lower() for ext in ['.jpg', '.png', '.jpeg', '.webp', '.gif']):
+                print(f"URL d'image détectée")
+                return {"type": "image", "content": content}
+            
+            return {"type": "text", "content": content}
+            
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code in [503, 429] and attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                print(f"⏳ HTTP {e.response.status_code}, retry dans {wait_time}s...")
+                time.sleep(wait_time)
+                continue
+            
+            error_text = e.response.text if hasattr(e.response, 'text') else str(e)
+            return {'type': 'error', 'content': f"Erreur Gemini HTTP {e.response.status_code}: {error_text}"}
+            
+        except ValueError as e:
+            print(f" Erreur JSON: {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            return {'type': 'error', 'content': f"Réponse invalide: {response.text[:200]}"}
+            
+        except Exception as e:
+            return {'type': 'error', 'content': f"Erreur Gemini: {str(e)}"}
+    
+    return {'type': 'error', 'content': "Service Gemini indisponible après 3 tentatives"}
 
 
-def call_model_api(model: ModelIA, prompt_text: str, temperature: float, 
-                   max_tokens: int, images: list = None):
-    """Appel vers l'API du modèle selon le fournisseur"""
+def call_model_api(model, prompt_text: str, temperature: float, max_tokens: int, images: list = None):
     fournisseur = model.fournisseur.lower()
-    
-    if fournisseur == "gpt4all":
-        if images:
-            return {"type": "error", "content": "GPT4All ne supporte pas les images"}
-        return call_gpt4all(prompt_text, temperature, max_tokens)
-    
-    # Récupération de la clé API
+    print(f" Appel: {fournisseur} - {model.nom_model}")
+
     api_key = get_api_key(fournisseur)
     if not api_key:
         return {"type": "error", "content": f"Clé API manquante pour {fournisseur}"}
-    
-    # Appels multimodaux si images présentes
-    if images and model.type_model == TypeModelEnum.multimodal:
-        if fournisseur in ["gpt", "openai"]:
-            return call_openai_multimodal(prompt_text, api_key, model.nom_model, 
-                                         temperature, max_tokens, images)
-        elif fournisseur == "gemini":
-            return call_gemini_multimodal(prompt_text, api_key, model.nom_model,
-                                         temperature, max_tokens, images)
-        else:
-            return {"type": "error", "content": f"Multimodal non supporté pour {fournisseur}"}
-    
-    # Appels texte uniquement
-    if fournisseur in ["gpt", "gpt3", "openai"]:
-        return call_openai_api(prompt_text, api_key, model.nom_model, temperature, max_tokens)
-    elif fournisseur == "grok":
-        return call_grok(prompt_text, api_key, temperature, max_tokens)
+
+    if fournisseur == "gpt":
+        return call_gpt_api(prompt_text, api_key, model.nom_model, temperature, max_tokens)
+    elif fournisseur in ["gemini", "gemini_flash"]:
+        return call_gemini_api(prompt_text, api_key, model.nom_model, temperature, max_tokens, images)
     else:
-        return {"type": "error", "content": f"Fournisseur non supporté: {fournisseur}"}
+        return {"type": "error", "content": f"Fournisseur inconnu: {fournisseur}"}
 
 
 def generer_contenu():
+    """Génère du contenu (texte/image/multimodal)"""
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
@@ -282,28 +275,39 @@ def generer_contenu():
         temperature = (prompt.parametres or {}).get("temperature") or model.parametres_default.get("temperature", 0.7)
         max_tokens = (prompt.parametres or {}).get("max_tokens") or model.parametres_default.get("max_tokens", 512)
 
-        # NOUVEAU : Récupérer les images si présentes
         images = data.get("images", [])
-        # Format attendu: [{"url": "..."}, {"base64": "...", "mime_type": "image/jpeg"}]
-        
         has_images = len(images) > 0
-        type_contenu = detect_content_type(model, prompt_text, has_images)
 
-        # Appel du modèle avec images
         resultat = call_model_api(model, prompt_text, temperature, max_tokens, images)
+        print(f" Résultat: type={resultat['type']}, taille={len(resultat.get('content', ''))}")
 
         if resultat["type"] == "error":
             return jsonify({"error": resultat["content"]}), 500
 
-        # NOUVEAU : Structure pour contenu multimodal
+        # Traitement selon le type de résultat
+        if resultat["type"] == "image":
+            type_contenu = TypeContenuEnum.image
+            # image_url = save_base64_image(resultat["content"], current_user_id)
+            image_url = resultat["content"]
+            text_content = None
+            print(f"IMAGE sauvegardée: {image_url}")
+            
+        elif resultat["type"] == "text":
+            type_contenu = TypeContenuEnum.multimodal if has_images else TypeContenuEnum.text
+            text_content = resultat["content"]
+            image_url = None
+            print(f" {type_contenu.value.upper()}")
+        else:
+            type_contenu = TypeContenuEnum.text
+            text_content = resultat["content"]
+            image_url = None
+
+        # Structure multimodale
         contenu_structure = None
         if type_contenu == TypeContenuEnum.multimodal:
             contenu_structure = {
-                "blocs": [
-                    {"type": "text", "contenu": prompt_text, "role": "input"}
-                ]
+                "blocs": [{"type": "text", "contenu": prompt_text, "role": "input"}]
             }
-            # Ajouter les images d'entrée
             for idx, img in enumerate(images):
                 contenu_structure["blocs"].append({
                     "type": "image",
@@ -311,7 +315,6 @@ def generer_contenu():
                     "description": f"Image {idx + 1}",
                     "role": "input"
                 })
-            # Ajouter la réponse du modèle
             contenu_structure["blocs"].append({
                 "type": "text",
                 "contenu": resultat["content"],
@@ -325,14 +328,15 @@ def generer_contenu():
             id_template=data.get("id_template"),
             titre=data.get("titre", "Contenu généré"),
             type_contenu=type_contenu,
-            texte=resultat["content"] if type_contenu in [TypeContenuEnum.text, TypeContenuEnum.multimodal] else None,
-            image_url=resultat["content"] if type_contenu == TypeContenuEnum.image else None,
-            contenu_structure=contenu_structure,  # NOUVEAU
+            texte=text_content if type_contenu in [TypeContenuEnum.text, TypeContenuEnum.multimodal] else None,
+            image_url=image_url,
+            contenu_structure=contenu_structure,
             meta={
                 "source": model.nom_model,
                 "date": str(datetime.utcnow()),
                 "has_images": has_images,
-                "image_count": len(images)
+                "image_count": len(images),
+                "detected_type": resultat["type"]
             }
         )
         
@@ -341,14 +345,16 @@ def generer_contenu():
 
         return jsonify({
             "message": "Contenu généré avec succès",
-            "contenu": resultat["content"],
+            "contenu": text_content,
             "type": type_contenu.value,
             "id": contenu.id,
-            "structure": contenu_structure
+            "structure": contenu_structure,
+            "image_url": image_url
         }), 201
 
     except Exception as e:
         db.session.rollback()
+        print(f" Erreur génération: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -375,7 +381,7 @@ def get_all_contenus():
         "type_contenu": c.type_contenu.value,
         "texte": c.texte,
         "image_url": c.image_url,
-        "contenu_structure": c.contenu_structure,  # NOUVEAU
+        "contenu_structure": c.contenu_structure,
         "meta": c.meta,
         "date_creation": c.date_creation.isoformat()
     } for c in contenus]
@@ -408,7 +414,7 @@ def get_contenu_by_id(contenu_id):
         "type_contenu": contenu.type_contenu.value,
         "texte": contenu.texte,
         "image_url": contenu.image_url,
-        "contenu_structure": contenu.contenu_structure,  # NOUVEAU
+        "contenu_structure": contenu.contenu_structure,
         "meta": contenu.meta,
         "date_creation": contenu.date_creation.isoformat()
     }), 200
@@ -435,8 +441,15 @@ def update_contenu(contenu_id):
         if "texte" in data:
             contenu.texte = data["texte"]
         if "image_url" in data:
-            contenu.image_url = data["image_url"]
-        if "contenu_structure" in data:  # NOUVEAU
+            # Si nouvelle image base64, la sauvegarder
+            if data["image_url"].startswith("data:image/"):
+                old_image = contenu.image_url
+                contenu.image_url = save_base64_image(data["image_url"], current_user_id)
+                if old_image:
+                    delete_image_file(old_image)
+            else:
+                contenu.image_url = data["image_url"]
+        if "contenu_structure" in data:
             contenu.contenu_structure = data["contenu_structure"]
         if "meta" in data:
             contenu.meta = data["meta"]
@@ -463,6 +476,9 @@ def delete_contenu(contenu_id):
         return jsonify({"error": "Non autorisé"}), 403
     
     try:
+        if contenu.image_url:
+            delete_image_file(contenu.image_url)
+        
         db.session.delete(contenu)
         db.session.commit()
         return jsonify({"message": "Contenu supprimé avec succès"}), 200

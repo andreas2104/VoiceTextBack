@@ -107,8 +107,11 @@ def update_template(template_id):
 
 
 def delete_template(template_id):
+    print(f"delete template: {template_id}")
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
+    print(f"current_user: {current_user}")
+    print(f"class: {type(current_user.type_compte)} value: {current_user.type_compte}")
     
     if not current_user:
         return jsonify({"error": "Utilisateur non trouvé"}), 404
@@ -118,6 +121,9 @@ def delete_template(template_id):
         return jsonify({"error": "Template not found"}), 404
         
     if template.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
+        print(f"current_user.type_compte: {current_user.type_compte}")
+        print(f"template.id_utilisateur: {template.id_utilisateur}, current_user_id: {current_user_id}")
+        print(f"class: {type(template.id_utilisateur)} vs {type(current_user_id)}")
         return jsonify({ "error": "unauthorized"}), 403
     
     try:
@@ -127,3 +133,4 @@ def delete_template(template_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
+    

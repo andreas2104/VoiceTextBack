@@ -14,6 +14,7 @@ from app.routes.plateforme_routes import plateforme_config_bp
 from app.routes.utilisateur_plateforme_routes import utilisateur_plateforme_bp
 from app.routes.historique_routes import historique_bp  
 from app.routes.publication_routes import publication_bp
+# from app.routes.uploads_route import uploads_bp
 from dotenv import load_dotenv
 import os
 from datetime import timedelta
@@ -30,7 +31,7 @@ def create_app():
     app.url_map.strict_slashes = False
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
-    # ✅ Détection de l'environnement
+    # Détection de l'environnement
     IS_PRODUCTION = os.getenv('FLASK_ENV') == 'production'
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
     
@@ -56,7 +57,7 @@ def create_app():
         'JWT_ACCESS_TOKEN_EXPIRES': timedelta(hours=1),
         'JWT_REFRESH_TOKEN_EXPIRES': timedelta(days=30),
         
-        # ✅ CONFIGURATION DIFFÉRENTE SELON ENVIRONNEMENT
+        #  CONFIGURATION DIFFÉRENTE SELON ENVIRONNEMENT
         'JWT_COOKIE_SECURE': IS_PRODUCTION,  # True en prod (HTTPS), False en dev (HTTP)
         'JWT_COOKIE_HTTPONLY': True,  # Toujours True pour la sécurité
         'JWT_COOKIE_SAMESITE': 'None' if IS_PRODUCTION else 'Lax',  # None en prod, Lax en dev
@@ -68,11 +69,9 @@ def create_app():
         'JWT_ALGORITHM': 'HS256',
     })
     
-    print(f"🍪 JWT_COOKIE_SECURE: {app.config['JWT_COOKIE_SECURE']}")
-    print(f"🍪 JWT_COOKIE_SAMESITE: {app.config['JWT_COOKIE_SAMESITE']}")
-    
-    # ============ CORS CONFIGURATION ============
-    # ✅ Configuration CORS adaptée
+    # print(f" JWT_COOKIE_SECURE: {app.config['JWT_COOKIE_SECURE']}")
+    # print(f"JWT_COOKIE_SAMESITE: {app.config['JWT_COOKIE_SAMESITE']}")
+
     CORS(app,
          resources={r"/api/*": {
              "origins": [FRONTEND_URL],
@@ -86,10 +85,10 @@ def create_app():
 
     jwt = JWTManager(app)
     
-    # ============ JWT ERROR HANDLERS ============
+
     @jwt.unauthorized_loader
     def unauthorized_callback(callback):
-        print(f"❌ JWT unauthorized: {callback}")
+        print(f" JWT unauthorized: {callback}")
         return jsonify({
             "error": "Missing or invalid token",
             "message": "Authorization required"
@@ -97,7 +96,7 @@ def create_app():
     
     @jwt.invalid_token_loader
     def invalid_token_callback(callback):
-        print(f"❌ JWT invalid token: {callback}")
+        print(f" JWT invalid token: {callback}")
         return jsonify({
             "error": "Invalid token",
             "message": str(callback)
@@ -105,7 +104,7 @@ def create_app():
     
     @jwt.expired_token_loader
     def expired_token_callback(jwt_header, jwt_payload):
-        print(f"❌ JWT expired - User: {jwt_payload.get('sub')}")
+        print(f" JWT expired - User: {jwt_payload.get('sub')}")
         return jsonify({
             "error": "Token expired",
             "message": "The token has expired"
@@ -115,7 +114,7 @@ def create_app():
     def check_if_token_revoked(jwt_header, jwt_payload):
         return False
     
-    # ============ DATABASE INITIALIZATION ============
+
     db.init_app(app)
     migrate.init_app(app, db)
     
@@ -123,7 +122,7 @@ def create_app():
         with app.app_context():
             db.create_all()
     
-    # ============ BLUEPRINT REGISTRATION ============
+ 
     blueprints = [
         (utilisateur_bp, '/api/utilisateurs'),
         (projet_bp, '/api/projets'),
@@ -135,8 +134,9 @@ def create_app():
         (utilisateur_plateforme_bp, "/api/plateformes"),
         (historique_bp, "/api/historiques"),
         (publication_bp, "/api/publications"),
-        (oauth_bp, "/api/oauth"),  # ✅ OAuth routes
-        (auth_bp, "/api/auth")     # ✅ Auth routes
+        (oauth_bp, "/api/oauth"), 
+        (auth_bp, "/api/auth"),
+        # (uploads_bp, None),  
     ]
     
     for blueprint, prefix in blueprints:
@@ -145,14 +145,13 @@ def create_app():
         else:
             app.register_blueprint(blueprint)
     
-    print(f"✅ {len(blueprints)} blueprints enregistrés")
+    print(f" {len(blueprints)} blueprints enregistrés")
 
-    # ============ SCHEDULER LIFECYCLE ============
     try:
         scheduler.start()
-        print("✅ Scheduler démarré")
+        print("Scheduler démarré")
     except Exception as e:
-        app.logger.error(f"❌ Erreur démarrage scheduler: {str(e)}")
+        app.logger.error(f" Erreur démarrage scheduler: {str(e)}")
 
     @app.teardown_appcontext
     def _shutdown_scheduler(exception=None):

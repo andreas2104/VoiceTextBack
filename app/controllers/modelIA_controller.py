@@ -9,7 +9,6 @@ from flask_jwt_extended import get_jwt_identity
 
 def get_all_modelIA():
     try: 
-        # Vérifier que l'utilisateur est authentifié
         current_user_id = get_jwt_identity()
         current_user = Utilisateur.query.get(current_user_id)
         
@@ -33,7 +32,6 @@ def get_all_modelIA():
   
 
 def get_modelIA_by_id(modelIA_id):
-    # Vérifier que l'utilisateur est authentifié
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
     
@@ -56,7 +54,6 @@ def get_modelIA_by_id(modelIA_id):
 
 
 def create_modelIA():
-    # Vérifier que l'utilisateur est admin
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
 

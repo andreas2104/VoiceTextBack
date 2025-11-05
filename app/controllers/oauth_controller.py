@@ -181,7 +181,7 @@ def google_callback():
         
         # ✅CRÉATION DES JWT COMME DANS auth_routes.py
         access_token_jwt = create_access_token(
-            identity=str(utilisateur.id), 
+            identity=utilisateur.id, 
             additional_claims={
                 'email': utilisateur.email,
                 'type_compte': utilisateur.type_compte.value
@@ -367,7 +367,7 @@ def x_callback():
         
         
         access_token_jwt = create_access_token(
-            identity=str(utilisateur.id), 
+            identity=utilisateur.id, 
             additional_claims={
                 'email': utilisateur.email,
                 'type_compte': utilisateur.type_compte.value,

@@ -9,11 +9,10 @@ from sqlalchemy import func
 from datetime import datetime, timedelta, timezone
 import requests
 from app.services.x_service import publish_to_x_api, delete_publication_from_x
-from app.scheduler.scheduler import scheduler
+from app.scheduler.scheduler import scheduler  
 
 
 def create_publication():
-    """Crée une publication immédiate ou programmée, avec publication sur X via x_service."""
     
     current_user_id = get_jwt_identity()
     
@@ -45,15 +44,14 @@ def create_publication():
             return jsonify({"error": "Non autorisé à utiliser ce contenu"}), 403
         
         texte_contenu = data.get("message") or contenu.texte or contenu.titre or ""
-        image_url = data.get("image_url") or contenu.image_url
+        
+        image_data = data.get("image_url") or contenu.image_url
         
         if not texte_contenu:
             return jsonify({"error": "Aucun contenu texte disponible pour la publication"}), 400
 
-        #  UTILISER datetime.utcnow() partout (naive UTC)
         now_utc = datetime.utcnow()
         
-        # Gestion de la planification
         statut = StatutPublicationEnum.brouillon
         date_programmee = None
         publier_maintenant = True
@@ -62,16 +60,12 @@ def create_publication():
         if data.get("date_programmee"):
             try:
                 date_str = data["date_programmee"]
-                
-                #  Le frontend envoie maintenant toujours un ISO UTC avec Z
                 date_str = date_str.replace('Z', '+00:00')
                 date_programmee_aware = datetime.fromisoformat(date_str)
                 
-                # Convertir en UTC naive pour stockage
                 if date_programmee_aware.tzinfo is not None:
                     date_programmee = date_programmee_aware.astimezone(timezone.utc).replace(tzinfo=None)
                 else:
-                    # Si pas de timezone (ne devrait pas arriver), on assume UTC
                     date_programmee = date_programmee_aware
                 
                 if date_programmee > now_utc:
@@ -95,7 +89,6 @@ def create_publication():
         url_publication = None
         tweet_data = {}
 
-        # Publication immédiate via x_service
         if publier_maintenant:
             token = Token.query.filter_by(utilisateur_id=current_user_id, provider='x').first()
             if not token or not token.is_valid():
@@ -104,7 +97,7 @@ def create_publication():
             url_publication, tweet_id, result = publish_to_x_api(
                 texte_contenu,  
                 token.access_token, 
-                image_url
+                image_data  
             )
 
             if not url_publication and "Erreur" in (result or ""):
@@ -126,15 +119,14 @@ def create_publication():
             contenu, "titre", f"Publication X - {now_utc.strftime('%d/%m/%Y')}"
         )
 
-        # Enregistrement en base avec dates naive UTC
         publication = Publication(
             id_utilisateur=current_user_id,
             id_contenu=data["id_contenu"],
             plateforme='x',
             titre_publication=titre_par_defaut,
             statut=statut,
-            date_programmee=date_programmee,  # naive UTC
-            date_publication=now_utc if statut == StatutPublicationEnum.publie else None,  # naive UTC
+            date_programmee=date_programmee,
+            date_publication=now_utc if statut == StatutPublicationEnum.publie else None,
             url_publication=url_publication,
             id_externe=tweet_id,
             parametres_publication={
@@ -142,7 +134,7 @@ def create_publication():
                 "api_response": tweet_data,
                 "publication_immediate": publier_maintenant,
                 "message": texte_contenu,
-                "image_url": image_url,
+                "image_url": image_data,  
                 "task_id": task_id    
             }
         )
@@ -150,12 +142,11 @@ def create_publication():
         db.session.add(publication)
         db.session.flush()
         
-        # Programmation avec scheduler (utiliser date aware pour le scheduler)
         if statut == StatutPublicationEnum.programme and date_programmee:
             try:
-                from app.scheduler.scheduler import scheduler
+                if scheduler is None:
+                    raise ImportError("Scheduler non disponible")
                 
-                # Convertir date_programmee en aware UTC pour APScheduler
                 date_programmee_aware = date_programmee.replace(tzinfo=timezone.utc)
                 delay_seconds = (date_programmee_aware - datetime.now(timezone.utc)).total_seconds()
 
@@ -172,14 +163,13 @@ def create_publication():
                     publication.parametres_publication['task_id'] = task_id
                     current_app.logger.info(f" Tâche programmée: {task_id} pour {date_programmee_aware}")
                 else:
-                    current_app.logger.warning(f" Date déjà passée, pas de programmation")
+                    current_app.logger.warning(f"Date déjà passée, pas de programmation")
                     
             except ImportError as e:
                 current_app.logger.warning(f" Scheduler non disponible: {str(e)}")
             except Exception as e:
                 current_app.logger.error(f" Erreur programmation: {str(e)}", exc_info=True)
 
-        # Mise à jour du contenu
         if statut == StatutPublicationEnum.publie:
             if hasattr(contenu, 'est_publie'):
                 contenu.est_publie = True
@@ -188,15 +178,19 @@ def create_publication():
 
         db.session.commit()
 
-        # Planifier récupération métriques
         try:
             if publication.statut == StatutPublicationEnum.publie and publication.id_externe:
-                scheduler.update_publication_metrics(publication.id)
-                scheduler.planifier_updates_metrics(publication.id)
+                # Vérifier que scheduler existe
+                if scheduler is not None and hasattr(scheduler, 'update_publication_metrics'):
+                    scheduler.update_publication_metrics(publication.id)
+                    if hasattr(scheduler, 'planifier_updates_metrics'):
+                        scheduler.planifier_updates_metrics(publication.id)
+                else:
+                    current_app.logger.warning("Scheduler ou méthodes metrics non disponibles")
         except Exception as e:
             current_app.logger.warning(f" Erreur planification métriques: {str(e)}")
 
-        current_app.logger.info(f" Publication créée avec succès (ID: {publication.id})")
+        current_app.logger.info(f"Publication créée avec succès (ID: {publication.id})")
 
         return jsonify({
             "message": "Publication créée avec succès" if publier_maintenant else "Publication programmée avec succès",
@@ -215,10 +209,8 @@ def create_publication():
 
 
 def update_publication(publication_id):
-    """Met à jour une publication"""
     current_user_id = get_jwt_identity()
     
-    # CONVERSION EN INT - C'EST LE FIX PRINCIPAL
     try:
         current_user_id = int(current_user_id)
     except (TypeError, ValueError):
@@ -235,14 +227,11 @@ def update_publication(publication_id):
         current_app.logger.error(f"Publication {publication_id} introuvable")
         return jsonify({"error": "Publication introuvable"}), 404
 
-    # Logs détaillés avec types
     current_app.logger.info(f"🔍 Vérification permissions:")
     current_app.logger.info(f"  - User ID: {current_user_id} (type: {type(current_user_id)})")
     current_app.logger.info(f"  - Type compte: {current_user.type_compte}")
     current_app.logger.info(f"  - Publication owner: {publication.id_utilisateur} (type: {type(publication.id_utilisateur)})")
-    current_app.logger.info(f"  - Égalité: {publication.id_utilisateur == current_user_id}")
     
-    # Maintenant la comparaison fonctionne correctement
     if publication.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
         current_app.logger.error(
             f" ACCÈS REFUSÉ - User {current_user_id} ({current_user.type_compte}) "
@@ -257,7 +246,7 @@ def update_publication(publication_id):
     if not data:
         return jsonify({"error": "Aucune donnée fournie"}), 400
     
-    current_app.logger.info(f"📝 Données de mise à jour: {list(data.keys())}")
+    current_app.logger.info(f" Données de mise à jour: {list(data.keys())}")
 
     try:
         champs_modifies = []
@@ -311,7 +300,7 @@ def update_publication(publication_id):
         db.session.commit()
         
         current_app.logger.info(
-            f"Publication {publication_id} modifiée par user {current_user_id}. "
+            f" Publication {publication_id} modifiée par user {current_user_id}. "
             f"Champs: {', '.join(champs_modifies)}"
         )
 
@@ -333,7 +322,6 @@ def update_publication(publication_id):
 
 
 def get_all_publications():
-    """Récupère toutes les publications selon les permissions"""
     current_user_id = get_jwt_identity()
     
     try:
@@ -355,7 +343,6 @@ def get_all_publications():
 
 
 def get_publication_by_id(publication_id):
-    """Récupère une publication par son ID"""
     current_user_id = get_jwt_identity()
     
     try:
@@ -379,7 +366,6 @@ def get_publication_by_id(publication_id):
 
 
 def delete_publication(publication_id):
-    """Supprime une publication locale et sur X si applicable"""
     current_user_id = get_jwt_identity()
     
     try:
@@ -428,17 +414,16 @@ def delete_publication(publication_id):
 
     except SQLAlchemyError as e:
         db.session.rollback()
-        current_app.logger.error(f"Erreur DB: {str(e)}")
+        current_app.logger.error(f" Erreur DB: {str(e)}")
         return jsonify({"error": f"Erreur de base de données: {str(e)}"}), 500
 
     except Exception as e:
-        current_app.logger.error(f"Erreur suppression: {str(e)}")
+        current_app.logger.error(f" Erreur suppression: {str(e)}")
         db.session.rollback()
         return jsonify({"error": f"Erreur lors de la suppression: {str(e)}"}), 500
 
 
 def get_publication_stats():
-    """Récupère les statistiques simples des publications"""
     current_user_id = get_jwt_identity()
     
     try:
@@ -539,13 +524,16 @@ def annuler_publication_programmee(publication_id):
         task_id = None
         try:
             task_id = (publication.parametres_publication or {}).get('task_id') or f'publication_{publication.id}'
-            if task_id and scheduler and scheduler.scheduler:
+            
+            if scheduler is not None and hasattr(scheduler, 'scheduler'):
                 job = scheduler.scheduler.get_job(task_id)
                 if job:
                     scheduler.scheduler.remove_job(task_id)
-                    current_app.logger.info(f"Tâche supprimée: {task_id}")
+                    current_app.logger.info(f" Tâche supprimée: {task_id}")
                 else:
-                    current_app.logger.warning(f"Tâche {task_id} introuvable")
+                    current_app.logger.warning(f" Tâche {task_id} introuvable")
+            else:
+                current_app.logger.warning(f" Scheduler non disponible")
         except Exception as e:
             current_app.logger.warning(f" Impossible de supprimer tâche: {str(e)}")
 
@@ -565,7 +553,7 @@ def annuler_publication_programmee(publication_id):
 
     except SQLAlchemyError as e:
         db.session.rollback()
-        current_app.logger.error(f"Erreur DB: {str(e)}")
+        current_app.logger.error(f" Erreur DB: {str(e)}")
         return jsonify({"error": "Erreur de base de données", "details": str(e)}), 500
 
     except Exception as e:

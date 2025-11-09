@@ -14,30 +14,30 @@ from app.routes.plateforme_routes import plateforme_config_bp
 from app.routes.utilisateur_plateforme_routes import utilisateur_plateforme_bp
 from app.routes.historique_routes import historique_bp  
 from app.routes.publication_routes import publication_bp
-# from app.routes.uploads_route import uploads_bp
 from dotenv import load_dotenv
 import os
 from datetime import timedelta
 from werkzeug.middleware.proxy_fix import ProxyFix
 from app.scheduler.scheduler import scheduler
+import atexit
 
 def create_app():
     load_dotenv()
 
     app = Flask(__name__)
 
-    scheduler.init_app(app)
-
+    # ============ CONFIGURATION URL ============
     app.url_map.strict_slashes = False
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
-    # Détection de l'environnement
+    # ============ DÉTECTION ENVIRONNEMENT ============
     IS_PRODUCTION = os.getenv('FLASK_ENV') == 'production'
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
     
-    print(f"🔧 Mode: {'PRODUCTION' if IS_PRODUCTION else 'DEVELOPMENT'}")
-    print(f"🌐 Frontend URL: {FRONTEND_URL}")
+    app.logger.info(f"🚀 Mode: {'PRODUCTION' if IS_PRODUCTION else 'DEVELOPMENT'}")
+    app.logger.info(f"🌐 Frontend URL: {FRONTEND_URL}")
 
+    # ============ CONFIGURATION FLASK ============
     app.config.update({
         'SECRET_KEY': os.getenv("SECRET_KEY", "default_secret_key"),
         'JWT_SECRET_KEY': os.getenv("JWT_SECRET_KEY", "your-jwt-secret-key"),
@@ -56,22 +56,18 @@ def create_app():
         'JWT_REFRESH_COOKIE_NAME': 'refresh_token_cookie',
         'JWT_ACCESS_TOKEN_EXPIRES': timedelta(hours=1),
         'JWT_REFRESH_TOKEN_EXPIRES': timedelta(days=30),
-        
-        #  CONFIGURATION DIFFÉRENTE SELON ENVIRONNEMENT
-        'JWT_COOKIE_SECURE': IS_PRODUCTION,  # True en prod (HTTPS), False en dev (HTTP)
-        'JWT_COOKIE_HTTPONLY': True,  # Toujours True pour la sécurité
-        'JWT_COOKIE_SAMESITE': 'None' if IS_PRODUCTION else 'Lax',  # None en prod, Lax en dev
-        'JWT_COOKIE_CSRF_PROTECT': False,  # À activer en production si CSRF nécessaire
-        'JWT_COOKIE_DOMAIN': None,  # Auto-détecté
+        'JWT_COOKIE_SECURE': IS_PRODUCTION,
+        'JWT_COOKIE_HTTPONLY': True,
+        'JWT_COOKIE_SAMESITE': 'None' if IS_PRODUCTION else 'Lax',
+        'JWT_COOKIE_CSRF_PROTECT': False,
+        'JWT_COOKIE_DOMAIN': None,
         'JWT_COOKIE_PATH': '/',
         'JWT_ACCESS_COOKIE_PATH': '/',
         'JWT_REFRESH_COOKIE_PATH': '/api/auth/refresh',
         'JWT_ALGORITHM': 'HS256',
     })
-    
-    # print(f" JWT_COOKIE_SECURE: {app.config['JWT_COOKIE_SECURE']}")
-    # print(f"JWT_COOKIE_SAMESITE: {app.config['JWT_COOKIE_SAMESITE']}")
 
+    # ============ CORS CONFIGURATION ============
     CORS(app,
          resources={r"/api/*": {
              "origins": [FRONTEND_URL],
@@ -83,12 +79,12 @@ def create_app():
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
          max_age=3600)
 
+    # ============ JWT INITIALIZATION ============
     jwt = JWTManager(app)
-    
 
     @jwt.unauthorized_loader
     def unauthorized_callback(callback):
-        print(f" JWT unauthorized: {callback}")
+        app.logger.warning(f" JWT unauthorized: {callback}")
         return jsonify({
             "error": "Missing or invalid token",
             "message": "Authorization required"
@@ -96,7 +92,7 @@ def create_app():
     
     @jwt.invalid_token_loader
     def invalid_token_callback(callback):
-        print(f" JWT invalid token: {callback}")
+        app.logger.warning(f" JWT invalid token: {callback}")
         return jsonify({
             "error": "Invalid token",
             "message": str(callback)
@@ -104,7 +100,7 @@ def create_app():
     
     @jwt.expired_token_loader
     def expired_token_callback(jwt_header, jwt_payload):
-        print(f" JWT expired - User: {jwt_payload.get('sub')}")
+        app.logger.info(f"🕐 JWT expired - User: {jwt_payload.get('sub')}")
         return jsonify({
             "error": "Token expired",
             "message": "The token has expired"
@@ -113,16 +109,18 @@ def create_app():
     @jwt.token_in_blocklist_loader
     def check_if_token_revoked(jwt_header, jwt_payload):
         return False
-    
 
     db.init_app(app)
     migrate.init_app(app, db)
     
     if not IS_PRODUCTION:
         with app.app_context():
-            db.create_all()
-    
- 
+            try:
+                db.create_all()
+                app.logger.info("Tables de base de données créées/vérifiées")
+            except Exception as e:
+                app.logger.error(f" Erreur création tables: {str(e)}")
+
     blueprints = [
         (utilisateur_bp, '/api/utilisateurs'),
         (projet_bp, '/api/projets'),
@@ -136,7 +134,6 @@ def create_app():
         (publication_bp, "/api/publications"),
         (oauth_bp, "/api/oauth"), 
         (auth_bp, "/api/auth"),
-        # (uploads_bp, None),  
     ]
     
     for blueprint, prefix in blueprints:
@@ -145,19 +142,49 @@ def create_app():
         else:
             app.register_blueprint(blueprint)
     
-    print(f" {len(blueprints)} blueprints enregistrés")
+    app.logger.info(f"📦 {len(blueprints)} blueprints enregistrés")
 
     try:
-        scheduler.start()
-        print("Scheduler démarré")
+        scheduler.init_app(app)
+        app.logger.info(" Scheduler initialisé")
+        
+        with app.app_context():
+            scheduler.start()
+            app.logger.info(" Scheduler démarré avec succès")
+            
     except Exception as e:
-        app.logger.error(f" Erreur démarrage scheduler: {str(e)}")
+        app.logger.error(f" Erreur initialisation/démarrage scheduler: {str(e)}", exc_info=True)
 
-    @app.teardown_appcontext
-    def _shutdown_scheduler(exception=None):
+    def shutdown_scheduler():
+        """Arrêter proprement le scheduler"""
         try:
-            scheduler.shutdown()
-        except Exception:
-            pass
+            if scheduler and hasattr(scheduler, 'scheduler') and scheduler.scheduler:
+                if scheduler.scheduler.running:
+                    scheduler.shutdown()
+                    app.logger.info(" Scheduler arrêté proprement")
+        except Exception as e:
+            app.logger.error(f" Erreur arrêt scheduler: {str(e)}")
+    
+    atexit.register(shutdown_scheduler)
+    
+    @app.teardown_appcontext
+    def teardown_scheduler(exception=None):
+        """Cleanup du scheduler en cas d'erreur dans le contexte"""
+        if exception:
+            app.logger.error(f" Exception dans le contexte: {exception}")
+    
+    
+    @app.route('/health')
+    def health_check():
+        """Endpoint pour vérifier la santé de l'application"""
+        scheduler_status = "running" if (scheduler and hasattr(scheduler, 'scheduler') 
+                                        and scheduler.scheduler and scheduler.scheduler.running) else "stopped"
+        
+        return jsonify({
+            "status": "healthy",
+            "environment": "production" if IS_PRODUCTION else "development",
+            "scheduler": scheduler_status,
+            "database": "connected"
+        }), 200
 
     return app

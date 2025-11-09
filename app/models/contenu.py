@@ -16,7 +16,7 @@ class Contenu(db.Model):
     id_model = db.Column(db.Integer, db.ForeignKey('model_ia.id', ondelete="CASCADE"), nullable=False)
     id_template = db.Column(db.Integer, db.ForeignKey('templates.id', ondelete="SET NULL"), nullable=True)
     id_prompt = db.Column(db.Integer, db.ForeignKey('prompt.id', ondelete="SET NULL"), nullable=True)
-    promptCustom = db.Column(db.Text, nullable=True)
+    custom_prompt = db.Column(db.Text, nullable=True)
     titre = db.Column(db.String(255), nullable=True)
     type_contenu = db.Column(db.Enum(TypeContenuEnum), default=TypeContenuEnum.text, nullable=False)
     texte = db.Column(db.Text, nullable=True)
@@ -37,6 +37,7 @@ class Contenu(db.Model):
             "id_projet": self.id_projet,
             "id_model": self.id_model,
             "id_template": self.id_template,
+            "custom_prompt": self.custom_prompt,
             "id_prompt": self.id_prompt,
             "titre": self.titre,
             "type_contenu": self.type_contenu.value if self.type_contenu else None,

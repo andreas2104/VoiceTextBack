@@ -10,75 +10,20 @@ from datetime import datetime
 from sqlalchemy.exc import SQLAlchemyError
 import requests
 import os
-import base64
-import time
 import re
-import uuid
+import time
 from typing import Optional
 
 
-
-UPLOAD_FOLDER = os.path.join(os.getcwd(), 'app', 'uploads', 'images')
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-
-def save_base64_image(base64_string: str, user_id: int) -> str:
-    try:
-        if base64_string.startswith('data:image/'):
-            header, base64_data = base64_string.split(',', 1)
-            mime_type = header.split(':')[1].split(';')[0]
-            extension = mime_type.split('/')[1]
-        else:
-            base64_data = base64_string
-            extension = 'png'
-        
-        filename = f"{user_id}_{uuid.uuid4().hex}.{extension}"
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        
-        image_data = base64.b64decode(base64_data)
-        with open(filepath, 'wb') as f:
-            f.write(image_data)
-        
-        print(f" Image sauvegardée: {filename}")
-        return f"/uploads/images/{filename}"
-    except Exception as e:
-        print(f" Erreur sauvegarde image: {str(e)}")
-        raise
-
-
-def delete_image_file(image_url: str):
-    if not image_url or not image_url.startswith('/uploads/'):
-        return
-    
-    try:
-        filename = image_url.split('/')[-1]
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        
-        if os.path.exists(filepath):
-            os.remove(filepath)
-            print(f"Image supprimée: {filename}")
-    except Exception as e:
-        print(f" Erreur suppression: {str(e)}")
-
-
 def is_valid_base64_image(content: str) -> bool:
+    """Vérifie si le contenu est une image base64 valide"""
     if content.startswith("data:image/"):
-        try:
-            _, base64_data = content.split(",", 1)
-            base64.b64decode(base64_data, validate=True)
-            return True
-        except Exception:
-            return False
-    
-    try:
-        base64.b64decode(content, validate=True)
-        return len(content) > 100
-    except Exception:
-        return False
+        return True
+    return len(content) > 100
 
 
 def extract_image_from_markdown(content: str) -> Optional[str]:
- 
+    """Extrait une image base64 depuis un format markdown"""
     patterns = [
         r'!\[.*?\]\((data:image/[^)]+)\)',
         r'\[.*?\]\((data:image/[^)]+)\)',
@@ -178,7 +123,7 @@ def call_gemini_api(prompt_text, api_key, model_name="gemini-2.0-flash-exp",
             if not response.text or response.text.strip() == "":
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt
-                    print(f"⏳ Réponse vide, retry dans {wait_time}s...")
+                    print(f" Réponse vide, retry dans {wait_time}s...")
                     time.sleep(wait_time)
                     continue
                 return {'type': 'error', 'content': 'Réponse vide de l\'API Gemini'}
@@ -187,22 +132,25 @@ def call_gemini_api(prompt_text, api_key, model_name="gemini-2.0-flash-exp",
             data = response.json()
             content = data["choices"][0]["message"]["content"]
             
-        
+            # Détection d'image markdown
             markdown_image = extract_image_from_markdown(content)
             if markdown_image:
-                print(f" Image markdown détectée")
+                print(f"Image markdown détectée")
                 return {"type": "image", "content": markdown_image}
             
+            # Détection data URI
             if content.startswith("data:image/"):
                 print(f" Data URI détectée")
                 return {"type": "image", "content": content}
             
+            # Détection base64 brute
             if len(content) > 50000 and is_valid_base64_image(content):
-                print(f" Image base64 brute détectée")
+                print(f"Image base64 brute détectée")
                 return {"type": "image", "content": f"data:image/png;base64,{content}"}
             
+            # Détection URL d'image
             if content.startswith("http") and any(ext in content.lower() for ext in ['.jpg', '.png', '.jpeg', '.webp', '.gif']):
-                print(f"URL d'image détectée")
+                print(f" URL d'image détectée")
                 return {"type": "image", "content": content}
             
             return {"type": "text", "content": content}
@@ -218,7 +166,7 @@ def call_gemini_api(prompt_text, api_key, model_name="gemini-2.0-flash-exp",
             return {'type': 'error', 'content': f"Erreur Gemini HTTP {e.response.status_code}: {error_text}"}
             
         except ValueError as e:
-            print(f" Erreur JSON: {str(e)}")
+            print(f"❌ Erreur JSON: {str(e)}")
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
                 continue
@@ -247,7 +195,6 @@ def call_model_api(model, prompt_text: str, temperature: float, max_tokens: int,
 
 
 def generer_contenu():
-    """Génère du contenu (texte/image/multimodal)"""
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
@@ -255,25 +202,46 @@ def generer_contenu():
         return jsonify({"error": "Utilisateur non trouvé"}), 404
 
     data = request.get_json()
-    required = ["id_prompt", "id_model"]
+    
+    if not data.get("id_prompt") and not data.get("custom_prompt"):
+        return jsonify({"error": "Soit 'id_prompt' soit 'custom_prompt' doit être fourni"}), 400
+
+    required = ["id_model"]
     missing = [f for f in required if f not in data]
     if missing:
         return jsonify({"error": f"Champs manquants: {', '.join(missing)}"}), 400
 
     try:
-        prompt = Prompt.query.get(data["id_prompt"])
         model = ModelIA.query.get(data["id_model"])
         template = Template.query.get(data.get("id_template")) if data.get("id_template") else None
 
-        if not prompt or not model:
-            return jsonify({"error": "Prompt ou modèle introuvable"}), 404
+        if not model:
+            return jsonify({"error": "Modèle introuvable"}), 404
 
-        prompt_text = prompt.texte_prompt
+        prompt_text = ""
+        id_prompt_used = None
+        prompt_custom_used = None
+
+        if data.get("id_prompt"):
+            prompt = Prompt.query.get(data["id_prompt"])
+            if not prompt:
+                return jsonify({"error": "Prompt introuvable"}), 404
+            
+            prompt_text = prompt.texte_prompt
+            id_prompt_used = data["id_prompt"]
+            
+            temperature = (prompt.parametres or {}).get("temperature") or model.parametres_default.get("temperature", 0.7)
+            max_tokens = (prompt.parametres or {}).get("max_tokens") or model.parametres_default.get("max_tokens", 512)
+            
+        else:
+            prompt_text = data["custom_prompt"]
+            prompt_custom_used = data["custom_prompt"]
+            
+            temperature = model.parametres_default.get("temperature", 0.7)
+            max_tokens = model.parametres_default.get("max_tokens", 512)
+
         if template:
             prompt_text = template.structure.replace("{{prompt}}", prompt_text)
-
-        temperature = (prompt.parametres or {}).get("temperature") or model.parametres_default.get("temperature", 0.7)
-        max_tokens = (prompt.parametres or {}).get("max_tokens") or model.parametres_default.get("max_tokens", 512)
 
         images = data.get("images", [])
         has_images = len(images) > 0
@@ -284,25 +252,22 @@ def generer_contenu():
         if resultat["type"] == "error":
             return jsonify({"error": resultat["content"]}), 500
 
-        # Traitement selon le type de résultat
         if resultat["type"] == "image":
             type_contenu = TypeContenuEnum.image
-            # image_url = save_base64_image(resultat["content"], current_user_id)
-            image_url = resultat["content"]
+            image_url = resultat["content"] 
             text_content = None
-            print(f"IMAGE sauvegardée: {image_url}")
+            print(f" IMAGE stockée en base64")
             
         elif resultat["type"] == "text":
             type_contenu = TypeContenuEnum.multimodal if has_images else TypeContenuEnum.text
             text_content = resultat["content"]
             image_url = None
-            print(f" {type_contenu.value.upper()}")
+            print(f"{type_contenu.value.upper()}")
         else:
             type_contenu = TypeContenuEnum.text
             text_content = resultat["content"]
             image_url = None
 
-        # Structure multimodale
         contenu_structure = None
         if type_contenu == TypeContenuEnum.multimodal:
             contenu_structure = {
@@ -323,13 +288,14 @@ def generer_contenu():
 
         contenu = Contenu(
             id_utilisateur=current_user.id,
-            id_prompt=data["id_prompt"],
+            id_prompt=id_prompt_used,
+            custom_prompt=prompt_custom_used,
             id_model=data["id_model"],
             id_template=data.get("id_template"),
             titre=data.get("titre", "Contenu généré"),
             type_contenu=type_contenu,
             texte=text_content if type_contenu in [TypeContenuEnum.text, TypeContenuEnum.multimodal] else None,
-            image_url=image_url,
+            image_url=image_url,  
             contenu_structure=contenu_structure,
             meta={
                 "source": model.nom_model,
@@ -349,7 +315,7 @@ def generer_contenu():
             "type": type_contenu.value,
             "id": contenu.id,
             "structure": contenu_structure,
-            "image_url": image_url
+            "image_url": image_url  
         }), 201
 
     except Exception as e:
@@ -375,12 +341,13 @@ def get_all_contenus():
         "id_utilisateur": c.id_utilisateur,
         "id_projet": c.id_projet,
         "id_prompt": c.id_prompt,
+        "custom_prompt": c.custom_prompt,
         "id_model": c.id_model,
         "id_template": c.id_template,
         "titre": c.titre,
         "type_contenu": c.type_contenu.value,
         "texte": c.texte,
-        "image_url": c.image_url,
+        "image_url": c.image_url,  # Le base64 sera retourné tel quel
         "contenu_structure": c.contenu_structure,
         "meta": c.meta,
         "date_creation": c.date_creation.isoformat()
@@ -390,9 +357,11 @@ def get_all_contenus():
 
 
 def get_contenu_by_id(contenu_id):
+    print(f"contenuId: {contenu_id}")
     current_user_id = get_jwt_identity()
     current_user = Utilisateur.query.get(current_user_id)
-    
+    print(f"current_user: {current_user}")
+    print(f'class:{type(current_user.type_compte)} : value {current_user.type_compte}")')
     if not current_user:
         return jsonify({"error": "Utilisateur non trouvé"}), 404
         
@@ -401,6 +370,9 @@ def get_contenu_by_id(contenu_id):
         return jsonify({"error": "Contenu introuvable"}), 404
         
     if contenu.id_utilisateur != current_user_id and current_user.type_compte != TypeCompteEnum.admin:
+        print(f"current_user.type_compte: {current_user.type_compte}")
+        print(f"contenu.id: {contenu.id_utilisateur}, current_user.id: {current_user.id}")
+        print(f"class: {type(contenu.id_utilisateur)} vs {type(current_user_id)}")
         return jsonify({"error": "Non autorisé"}), 403
 
     return jsonify({
@@ -408,12 +380,13 @@ def get_contenu_by_id(contenu_id):
         "id_utilisateur": contenu.id_utilisateur,
         "id_projet": contenu.id_projet,
         "id_prompt": contenu.id_prompt,
+        "custom_prompt": contenu.custom_prompt,
         "id_model": contenu.id_model,
         "id_template": contenu.id_template,
         "titre": contenu.titre,
         "type_contenu": contenu.type_contenu.value,
         "texte": contenu.texte,
-        "image_url": contenu.image_url,
+        "image_url": contenu.image_url,  
         "contenu_structure": contenu.contenu_structure,
         "meta": contenu.meta,
         "date_creation": contenu.date_creation.isoformat()
@@ -441,18 +414,15 @@ def update_contenu(contenu_id):
         if "texte" in data:
             contenu.texte = data["texte"]
         if "image_url" in data:
-            # Si nouvelle image base64, la sauvegarder
-            if data["image_url"].startswith("data:image/"):
-                old_image = contenu.image_url
-                contenu.image_url = save_base64_image(data["image_url"], current_user_id)
-                if old_image:
-                    delete_image_file(old_image)
-            else:
-                contenu.image_url = data["image_url"]
+            contenu.image_url = data["image_url"]
         if "contenu_structure" in data:
             contenu.contenu_structure = data["contenu_structure"]
         if "meta" in data:
             contenu.meta = data["meta"]
+        if "custom_prompt" in data:
+            contenu.custom_prompt = data["custom_prompt"]
+        if "id_prompt" in data:
+            contenu.id_prompt = data["id_prompt"]
             
         db.session.commit()
         return jsonify({"message": "Contenu mis à jour avec succès", "contenu_id": contenu.id}), 200
@@ -476,9 +446,6 @@ def delete_contenu(contenu_id):
         return jsonify({"error": "Non autorisé"}), 403
     
     try:
-        if contenu.image_url:
-            delete_image_file(contenu.image_url)
-        
         db.session.delete(contenu)
         db.session.commit()
         return jsonify({"message": "Contenu supprimé avec succès"}), 200

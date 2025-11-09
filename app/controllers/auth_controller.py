@@ -187,7 +187,7 @@ def logout():
         response = make_response(jsonify({"message": "Déconnexion réussie"}), 200)
         unset_jwt_cookies(response)
         
-        print("✅ Logout successful, cookies cleared")
+        print("Logout successful, cookies cleared")
         
         return response
         

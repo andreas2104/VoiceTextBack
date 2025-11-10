@@ -203,3 +203,58 @@ def create_app():
 
 
 # code coller pour la configuration de scheduler
+
+
+
+# def upload_image_to_x(access_token, image_url):
+#     try:
+#         # Decode base64 image
+#         [prefix, image_data] = image_url.split(',', maxsplit=1)
+#         print(f"sample_0: {image_data[0:100]}...")
+#         [_, ty] = prefix.split(":")
+#         [media_type, _] = ty.split(";")
+        
+#         image_bytes = base64.b64decode(image_data)
+
+#         # INIT upload
+#         url = "https://upload.twitter.com/1.1/media/upload.json"
+        
+#         headers = {
+#             "Authorization": f"Bearer {access_token}"
+#             # Don't set Content-Type - requests will set it automatically with boundary
+#         }
+
+#         # Use data parameter for form fields and files for the actual file
+#         files = {
+#             'media': ('image.jpg', image_bytes, media_type)
+#         }
+        
+#         data = {
+#             'media_category': 'tweet_image'
+#         }
+
+#         upload_response = requests.post(
+#             url, 
+#             headers=headers, 
+#             files=files,
+#             # data=data, #in cqse comment it
+#             timeout=30
+#         )
+
+#         print(f"status: {upload_response.status_code}")
+#         print(f"response: {upload_response.text}")
+        
+#         if upload_response.status_code in [200, 201]:
+#             media_id_string = upload_response.json().get("media_id_string")
+#             current_app.logger.info(f"Upload reussi, media_id: {media_id_string}")
+#             return media_id_string  # Use media_id_string, not media_id
+#         else:
+#             current_app.logger.error(
+#                 f"Erreur upload image: {upload_response.status_code} - {upload_response.text}"
+#             )
+#             return None
+        
+#     except Exception as e:
+#         current_app.logger.error(f"Erreur upload image: {repr(e)}")
+#         return None
+# try it if you have a good acces connexion

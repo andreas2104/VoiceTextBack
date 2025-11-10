@@ -1,4 +1,4 @@
-#!/home/youngs/Desktop/StageM2/voiceTextBackend/venv/bin/python3
+#!/home/youngs/Desktop/StageM2/Backend/venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys

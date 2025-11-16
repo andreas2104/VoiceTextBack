@@ -3,7 +3,7 @@ from flask import request, jsonify
 from app.extensions import db
 from app.models.plateforme import PlateformeConfig, UtilisateurPlateforme, OAuthState
 from app.models.utilisateur import Utilisateur, TypeCompteEnum
-from flask_jwt_extended import get_jwt_identity
+from app.utils.identity import  get_identity
 from datetime import datetime
 import secrets
 import requests
@@ -11,7 +11,7 @@ import json
 
 
 def create_plateforme():
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user or current_user.type_compte != TypeCompteEnum.admin:
@@ -60,7 +60,7 @@ def create_plateforme():
 
 
 def get_plateformes():
-    current_user_id = get_jwt_identity() 
+    current_user_id = get_identity() 
     current_user = Utilisateur.query.get(current_user_id)
     if not current_user_id:
         return jsonify({"error": "Authentification requise"}), 401 
@@ -72,7 +72,7 @@ def get_plateformes():
 
 
 def get_plateforme_by_id(plateforme_id):
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
     if not current_user_id:
         return jsonify({"error":"Authentification requise"}), 401
@@ -85,7 +85,7 @@ def get_plateforme_by_id(plateforme_id):
 
 
 def update_plateforme(plateforme_id):
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user or current_user.type_compte != TypeCompteEnum.admin:
@@ -123,7 +123,7 @@ def update_plateforme(plateforme_id):
 
 def delete_plateforme(plateforme_id):
     """Supprime une plateforme et toutes ses dépendances"""
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user or current_user.type_compte != TypeCompteEnum.admin:

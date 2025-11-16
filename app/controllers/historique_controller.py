@@ -2,13 +2,13 @@ from flask import request, jsonify
 from app.extensions import db
 from app.models.historique import Historique, TypeActionEnum
 from app.models.utilisateur import Utilisateur, TypeCompteEnum
-from flask_jwt_extended import get_jwt_identity
+from app.utils.identity import  get_identity
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import desc
 
 def get_all_historiques():
     """Récupère l'historique selon les permissions"""
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user:
@@ -24,7 +24,7 @@ def get_all_historiques():
 
 def get_historique_by_contenu(contenu_id):
     """Récupère l'historique d'un contenu spécifique"""
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user:

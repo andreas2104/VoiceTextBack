@@ -1,6 +1,7 @@
+from app.utils.identity import get_identity
 from flask import Blueprint, jsonify
 from app.controllers import auth_controller
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 
 auth_bp = Blueprint("auth_bp", __name__)
 
@@ -15,7 +16,7 @@ def login():
 @auth_bp.route("/protected", methods=['GET'])
 @jwt_required()
 def protected_route():
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     return jsonify(message=f'Hello, user {current_user_id}! You have access to the protected resource.'), 200
 
 @auth_bp.route("/me", methods=["GET"])

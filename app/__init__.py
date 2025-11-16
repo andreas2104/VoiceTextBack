@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_from_directory, abort, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from .extensions import db, migrate
@@ -23,21 +23,17 @@ import atexit
 
 def create_app():
     load_dotenv()
+    app = Flask(__name__, static_folder="../../Front/out", static_url_path="/")  
 
-    app = Flask(__name__)
-
-    # ============ CONFIGURATION URL ============
     app.url_map.strict_slashes = False
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
-    # ============ DÉTECTION ENVIRONNEMENT ============
     IS_PRODUCTION = os.getenv('FLASK_ENV') == 'production'
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
     
-    app.logger.info(f"🚀 Mode: {'PRODUCTION' if IS_PRODUCTION else 'DEVELOPMENT'}")
-    app.logger.info(f"🌐 Frontend URL: {FRONTEND_URL}")
+    app.logger.info(f"Mode: {'PRODUCTION' if IS_PRODUCTION else 'DEVELOPMENT'}")
+    app.logger.info(f"Frontend URL: {FRONTEND_URL}")
 
-    # ============ CONFIGURATION FLASK ============
     app.config.update({
         'SECRET_KEY': os.getenv("SECRET_KEY", "default_secret_key"),
         'JWT_SECRET_KEY': os.getenv("JWT_SECRET_KEY", "your-jwt-secret-key"),
@@ -50,7 +46,7 @@ def create_app():
             'max_overflow': 20
         },
         
-        # ============ JWT CONFIGURATION ============
+    
         'JWT_TOKEN_LOCATION': ['cookies'],
         'JWT_ACCESS_COOKIE_NAME': 'access_token_cookie',
         'JWT_REFRESH_COOKIE_NAME': 'refresh_token_cookie',
@@ -67,7 +63,6 @@ def create_app():
         'JWT_ALGORITHM': 'HS256',
     })
 
-    # ============ CORS CONFIGURATION ============
     CORS(app,
          resources={r"/api/*": {
              "origins": [FRONTEND_URL],
@@ -79,7 +74,6 @@ def create_app():
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
          max_age=3600)
 
-    # ============ JWT INITIALIZATION ============
     jwt = JWTManager(app)
 
     @jwt.unauthorized_loader
@@ -100,7 +94,7 @@ def create_app():
     
     @jwt.expired_token_loader
     def expired_token_callback(jwt_header, jwt_payload):
-        app.logger.info(f"🕐 JWT expired - User: {jwt_payload.get('sub')}")
+        app.logger.info(f"JWT expired - User: {jwt_payload.get('sub')}")
         return jsonify({
             "error": "Token expired",
             "message": "The token has expired"
@@ -141,19 +135,19 @@ def create_app():
             app.register_blueprint(blueprint, url_prefix=prefix)
         else:
             app.register_blueprint(blueprint)
-    
-    app.logger.info(f"📦 {len(blueprints)} blueprints enregistrés")
+
+    app.logger.info(f"{len(blueprints)} blueprints enregistrés")
 
     try:
         scheduler.init_app(app)
-        app.logger.info(" Scheduler initialisé")
-        
+        app.logger.info("Scheduler initialisé")
+
         with app.app_context():
             scheduler.start()
-            app.logger.info(" Scheduler démarré avec succès")
-            
+            app.logger.info("Scheduler démarré avec succès")
+
     except Exception as e:
-        app.logger.error(f" Erreur initialisation/démarrage scheduler: {str(e)}", exc_info=True)
+        app.logger.error(f"Erreur initialisation/démarrage scheduler: {str(e)}", exc_info=True)
 
     def shutdown_scheduler():
         """Arrêter proprement le scheduler"""
@@ -161,30 +155,62 @@ def create_app():
             if scheduler and hasattr(scheduler, 'scheduler') and scheduler.scheduler:
                 if scheduler.scheduler.running:
                     scheduler.shutdown()
-                    app.logger.info(" Scheduler arrêté proprement")
+                    app.logger.info("Scheduler arrêté proprement")
         except Exception as e:
-            app.logger.error(f" Erreur arrêt scheduler: {str(e)}")
-    
+            app.logger.error(f"Erreur arrêt scheduler: {str(e)}")
+
     atexit.register(shutdown_scheduler)
     
     @app.teardown_appcontext
     def teardown_scheduler(exception=None):
         """Cleanup du scheduler en cas d'erreur dans le contexte"""
         if exception:
-            app.logger.error(f" Exception dans le contexte: {exception}")
+            app.logger.error(f"Exception dans le contexte: {exception}")
     
     
-    @app.route('/health')
-    def health_check():
-        """Endpoint pour vérifier la santé de l'application"""
-        scheduler_status = "running" if (scheduler and hasattr(scheduler, 'scheduler') 
-                                        and scheduler.scheduler and scheduler.scheduler.running) else "stopped"
+    # @app.route('/health')
+    # def health_check():
+    #     """Endpoint pour vérifier la santé de l'application"""
+    #     scheduler_status = "running" if (scheduler and hasattr(scheduler, 'scheduler') 
+    #                                     and scheduler.scheduler and scheduler.scheduler.running) else "stopped"
         
-        return jsonify({
-            "status": "healthy",
-            "environment": "production" if IS_PRODUCTION else "development",
-            "scheduler": scheduler_status,
-            "database": "connected"
-        }), 200
+    #     return jsonify({
+    #         "status": "healthy",
+    #         "environment": "production" if IS_PRODUCTION else "development",
+    #         "scheduler": scheduler_status,
+    #         "database": "connected"
+    #     }), 200
+
+    @app.before_request
+    def try_files_middleware():
+        print("H", request.path)
+        # Ignore API routes
+        if request.path.startswith("/api/"):
+            return None
+
+        path = os.path.join(app.static_folder, request.path.lstrip("/"))
+        print(os.path.realpath(path))
+
+        if request.path == "/":
+            return send_from_directory(app.static_folder, "index.html")
+
+        # Try the requested path
+        if os.path.isfile(path):
+            return send_from_directory(app.static_folder, request.path.lstrip("/"))
+
+        # Try adding .html
+        html_path = path + ".html"
+        if os.path.isfile(html_path):
+            return send_from_directory(app.static_folder, request.path.lstrip("/") + ".html")
+
+        # Try as a directory (serve index.html)
+        if os.path.isdir(path):
+            index_path = os.path.join(path, "index.html")
+            if os.path.isfile(index_path):
+                return send_from_directory(path, "index.html")
+
+        # If nothing matches, return  # Only for non-API routes
+        if not request.path.startswith("/api/"):
+            abort(404)
 
     return app

@@ -3,7 +3,7 @@ from app.extensions import db
 from app.models.publication import Publication, StatutPublicationEnum
 from app.models.utilisateur import Utilisateur, TypeCompteEnum, Token
 from app.models.contenu import Contenu
-from flask_jwt_extended import get_jwt_identity
+from app.utils.identity import  get_identity
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func
 from datetime import datetime, timedelta, timezone
@@ -14,7 +14,7 @@ from app.scheduler.scheduler import scheduler
 
 def create_publication():
     
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     
     try:
         current_user_id = int(current_user_id)
@@ -209,7 +209,7 @@ def create_publication():
 
 
 def update_publication(publication_id):
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     
     try:
         current_user_id = int(current_user_id)
@@ -322,7 +322,7 @@ def update_publication(publication_id):
 
 
 def get_all_publications():
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     
     try:
         current_user_id = int(current_user_id)
@@ -343,7 +343,7 @@ def get_all_publications():
 
 
 def get_publication_by_id(publication_id):
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     
     try:
         current_user_id = int(current_user_id)
@@ -366,7 +366,7 @@ def get_publication_by_id(publication_id):
 
 
 def delete_publication(publication_id):
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     
     try:
         current_user_id = int(current_user_id)
@@ -424,7 +424,7 @@ def delete_publication(publication_id):
 
 
 def get_publication_stats():
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     
     try:
         current_user_id = int(current_user_id)
@@ -492,7 +492,7 @@ def get_publication_stats():
 
 def annuler_publication_programmee(publication_id):
     """Annule une publication programmée"""
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     
     try:
         current_user_id = int(current_user_id)

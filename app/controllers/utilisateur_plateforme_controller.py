@@ -2,7 +2,7 @@ from flask import request, jsonify, url_for, redirect
 from app.extensions import db
 from app.models.plateforme import PlateformeConfig, UtilisateurPlateforme, OAuthState
 from app.models.utilisateur import Utilisateur
-from flask_jwt_extended import get_jwt_identity
+from app.utils.identity import  get_identity
 from datetime import datetime
 import secrets
 import requests
@@ -10,7 +10,7 @@ import requests
 
 def get_user_plateformes():
     """Récupère toutes les plateformes connectées de l'utilisateur actuel"""
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     if not current_user_id:
         return jsonify({"error": "Authentification requise"}), 401
 
@@ -26,7 +26,7 @@ def get_user_plateformes():
 
 def get_user_plateforme_by_id(user_plateforme_id):
     """Récupère une connexion plateforme spécifique"""
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     if not current_user_id:
         return jsonify({"error": "Authentification requise"}), 401
 
@@ -46,7 +46,7 @@ def get_user_plateforme_by_id(user_plateforme_id):
 
 def disconnect_user_plateforme(user_plateforme_id):
     """Déconnecte un utilisateur d'une plateforme"""
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     if not current_user_id:
         return jsonify({"error": "Authentification requise"}), 401
 
@@ -74,7 +74,7 @@ def disconnect_user_plateforme(user_plateforme_id):
 
 def update_user_plateforme_meta(user_plateforme_id):
     """Met à jour les métadonnées d'une connexion plateforme"""
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     if not current_user_id:
         return jsonify({"error": "Authentification requise"}), 401
 
@@ -106,7 +106,7 @@ def update_user_plateforme_meta(user_plateforme_id):
     
 def initiate_oauth(plateforme_nom):
     """Initialise le flux OAuth pour une plateforme"""
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     if not current_user_id:
         return jsonify({"error": "Authentification requise"}), 401
 
@@ -581,7 +581,7 @@ def oauth_callback(plateforme_nom):
 
 def refresh_token(user_plateforme_id):
     """Rafraîchit le token d'accès d'une connexion plateforme"""
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     if not current_user_id:
         return jsonify({"error": "Authentification requise"}), 401
 
@@ -646,7 +646,7 @@ def refresh_token(user_plateforme_id):
 
 def check_token_validity(user_plateforme_id):
     """Vérifie la validité du token d'une connexion plateforme"""
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     if not current_user_id:
         return jsonify({"error": "Authentification requise"}), 401
 
@@ -674,7 +674,7 @@ def check_token_validity(user_plateforme_id):
 
 def cleanup_expired_states():
     """Nettoie les states OAuth expirés (fonction admin)"""
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     if not current_user_id:
         return jsonify({"error": "Authentification requise"}), 401
 

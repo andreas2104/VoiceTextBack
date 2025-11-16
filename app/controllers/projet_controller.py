@@ -4,12 +4,12 @@ from app.models.utilisateur import Utilisateur, TypeCompteEnum
 from app.extensions import db
 from datetime import datetime
 from sqlalchemy.exc import SQLAlchemyError
-from flask_jwt_extended import get_jwt_identity
+from app.utils.identity import  get_identity
 import json
 
 def get_all_projet():
     try:
-        current_user_id = get_jwt_identity()
+        current_user_id = get_identity()
         current_user = Utilisateur.query.get(current_user_id)
 
         if not current_user:
@@ -38,7 +38,7 @@ def get_all_projet():
 
 
 def get_projet_by_id(projet_id):
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     projet = Projet.query.get(projet_id)
@@ -60,7 +60,7 @@ def get_projet_by_id(projet_id):
     }), 200
 
 def create_projet():
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user:
@@ -106,7 +106,7 @@ def create_projet():
     
 
 def update_projet(projet_id):
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     projet = Projet.query.get(projet_id)
@@ -137,7 +137,7 @@ def update_projet(projet_id):
     
 
 def delete_projet(projet_id):
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)   
     
     if not current_user:

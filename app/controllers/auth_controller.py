@@ -4,8 +4,7 @@ from app.extensions import db
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import (
     create_access_token, 
-    create_refresh_token, 
-    get_jwt_identity, 
+    create_refresh_token,  
     jwt_required, 
     get_jwt, 
     unset_jwt_cookies,
@@ -13,6 +12,7 @@ from flask_jwt_extended import (
     set_refresh_cookies
 )
 import os
+from app.utils.identity import  get_identity
 
 ADMIN_EMAILS = os.getenv('ADMIN_EMAILS', '').split(",")
 

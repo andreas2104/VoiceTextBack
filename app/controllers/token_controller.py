@@ -2,8 +2,7 @@ from flask import  Blueprint, request, jsonify
 from app.extensions import db
 from app.models.utilisateur import Token
 from datetime import datetime, timedelta
-from flask_jwt_extended import get_jwt_identity
-
+from app.utils.identity import  get_identity
 token_bp = Blueprint('token_bp', __name__)
 
 @token_bp.route('/token',methods=['GET'])

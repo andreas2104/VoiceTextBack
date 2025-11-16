@@ -2,12 +2,12 @@ from flask import request, jsonify
 from app.models.template import Template
 from app.models.utilisateur import Utilisateur, TypeCompteEnum
 from app.extensions import db
-from flask_jwt_extended import get_jwt_identity
+from app.utils.identity import  get_identity
 from sqlalchemy.exc import SQLAlchemyError
 
 def get_all_template():
     try:
-        current_user_id = get_jwt_identity()
+        current_user_id = get_identity()
         current_user = Utilisateur.query.get(current_user_id)
 
         if not current_user:
@@ -26,7 +26,7 @@ def get_all_template():
         return jsonify({"error": str(e)}), 500
 
 def get_template_by_id(template_id):
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
     
 
@@ -42,7 +42,7 @@ def get_template_by_id(template_id):
 
 
 def create_template():
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user:
@@ -74,7 +74,7 @@ def create_template():
 
 
 def update_template(template_id):
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
     
     if not current_user:
@@ -108,7 +108,7 @@ def update_template(template_id):
 
 def delete_template(template_id):
     print(f"delete template: {template_id}")
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
     print(f"current_user: {current_user}")
     print(f"class: {type(current_user.type_compte)} value: {current_user.type_compte}")

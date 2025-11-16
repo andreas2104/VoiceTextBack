@@ -2,11 +2,10 @@ from flask import request, jsonify
 from app.models.utilisateur import Utilisateur, TypeCompteEnum
 from app.extensions import db
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask_jwt_extended import get_jwt_identity
-
+from app.utils.identity import  get_identity
 def get_all_utilisateurs():
     try:
-        current_user_id = get_jwt_identity()
+        current_user_id = get_identity()
         current_user = Utilisateur.query.get(current_user_id)
 
         if current_user.type_compte != TypeCompteEnum.admin:
@@ -29,7 +28,7 @@ def get_all_utilisateurs():
     
 
 def get_utilisateur_by_id(utilisateur_id):
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if current_user_id != utilisateur_id and current_user.type_compte != TypeCompteEnum.admin:
@@ -50,7 +49,7 @@ def get_utilisateur_by_id(utilisateur_id):
 
 def update_utilisateur(utilisateur_id):
     try:
-        current_user_id = get_jwt_identity()
+        current_user_id = get_identity()
         current_user = Utilisateur.query.get(current_user_id)
         if not current_user:
             return jsonify({"error": "Utilisateur courant non trouvé"}), 404
@@ -89,7 +88,7 @@ def update_utilisateur(utilisateur_id):
         return jsonify({"error": str(e)}), 500
 
 def delete_utilisateur(utilisateur_id):  
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if current_user.type_compte != TypeCompteEnum.admin:
@@ -108,7 +107,7 @@ def delete_utilisateur(utilisateur_id):
 
 def current_utilisateur():
     try:
-        current_user_id = get_jwt_identity()
+        current_user_id = get_identity()
         if not current_user_id:
             return jsonify({"error": "Token invalide"}), 401
 

@@ -1,3 +1,32 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+
+RUN npm install --legacy-peer-deps
+
+
+COPY . .
+
+ENV NEXT_DISABLE_ESLINT=1
+
+
+RUN npm run build
+
+
+EXPOSE 3000
+
+
+CMD ["npm", "start"]
+
+
+
+
+
+
+
+
 FROM python:3.13.9-alpine
 
 # upgrade pip
@@ -26,7 +55,7 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 RUN export FLASK_APP=app.py
 RUN pip install -r requirements.txt
 
-# define the port number the container should expose
+# define the port number the conta    iner should expose
 EXPOSE 5000
 
 CMD ["python", "app.py"]

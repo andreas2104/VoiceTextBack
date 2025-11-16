@@ -1,13 +1,14 @@
 from functools import wraps
+from app.utils.identity import get_identity
 from flask import jsonify
-from flask_jwt_extended import get_jwt_identity, jwt_required
+from flask_jwt_extended import jwt_required
 
 def roles_required(*roles):
     def wrapper(fn):
         @wraps(fn)
         @jwt_required()
         def decorated(*args, **kwargs):
-            identity = get_jwt_identity() or {}
+            identity = get_identity() or {}
             role = identity.get("role")
             if role not in roles:
                 return jsonify({"error": "Accès refusé"}), 403

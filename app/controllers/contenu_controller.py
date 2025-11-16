@@ -5,7 +5,7 @@ from app.models.prompt import Prompt
 from app.models.modelIA import ModelIA
 from app.models.template import Template
 from app.models.utilisateur import Utilisateur, TypeCompteEnum
-from flask_jwt_extended import get_jwt_identity
+from app.utils.identity import  get_identity
 from datetime import datetime
 from sqlalchemy.exc import SQLAlchemyError
 import requests
@@ -195,7 +195,7 @@ def call_model_api(model, prompt_text: str, temperature: float, max_tokens: int,
 
 
 def generer_contenu():
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user:
@@ -325,7 +325,7 @@ def generer_contenu():
 
 
 def get_all_contenus():
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user:
@@ -358,7 +358,7 @@ def get_all_contenus():
 
 def get_contenu_by_id(contenu_id):
     print(f"contenuId: {contenu_id}")
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
     print(f"current_user: {current_user}")
     print(f'class:{type(current_user.type_compte)} : value {current_user.type_compte}")')
@@ -394,7 +394,7 @@ def get_contenu_by_id(contenu_id):
 
 
 def update_contenu(contenu_id):
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
     
     if not current_user:
@@ -432,7 +432,7 @@ def update_contenu(contenu_id):
 
 
 def delete_contenu(contenu_id):
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user:

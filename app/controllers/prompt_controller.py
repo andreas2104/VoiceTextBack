@@ -4,12 +4,12 @@ from app.models.utilisateur import Utilisateur, TypeCompteEnum
 from app.extensions import db
 from datetime import datetime
 import json
-from flask_jwt_extended import get_jwt_identity
+from app.utils.identity import  get_identity
 from sqlalchemy.exc import SQLAlchemyError
 
 
 def get_user():
-   current_user_id = get_jwt_identity()
+   current_user_id = get_identity()
    current_user = Utilisateur.query.get(current_user_id)
    if not current_user:
       return None, jsonify({"error": "Utilisateur non trouver"}), 404

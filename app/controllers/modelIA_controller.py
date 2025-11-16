@@ -4,12 +4,11 @@ from app.models.utilisateur import Utilisateur, TypeCompteEnum
 from app.extensions import db
 from sqlalchemy.exc import SQLAlchemyError
 import json
-from flask_jwt_extended import get_jwt_identity
-
+from app.utils.identity import  get_identity
 
 def get_all_modelIA():
     try: 
-        current_user_id = get_jwt_identity()
+        current_user_id = get_identity()
         current_user = Utilisateur.query.get(current_user_id)
         
         if not current_user_id:
@@ -32,7 +31,7 @@ def get_all_modelIA():
   
 
 def get_modelIA_by_id(modelIA_id):
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
     
     if not current_user_id:
@@ -54,7 +53,7 @@ def get_modelIA_by_id(modelIA_id):
 
 
 def create_modelIA():
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user or current_user.type_compte != TypeCompteEnum.admin:
@@ -100,7 +99,7 @@ def create_modelIA():
 
 def update_modelIA(modelIA_id):
     # Vérifier que l'utilisateur est admin
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user or current_user.type_compte != TypeCompteEnum.admin:
@@ -144,7 +143,7 @@ def update_modelIA(modelIA_id):
 
 def delete_modelIA(modelIA_id):
     # Vérifier que l'utilisateur est admin
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user or current_user.type_compte != TypeCompteEnum.admin:
@@ -171,7 +170,7 @@ def delete_modelIA(modelIA_id):
 def toggle_model_activation(modelIA_id):
     """Activer/désactiver un modèle IA"""
     # Vérifier que l'utilisateur est admin
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user or current_user.type_compte != TypeCompteEnum.admin:
@@ -204,7 +203,7 @@ def get_active_models():
     """Récupérer uniquement les modèles actifs (accessible à tous les utilisateurs authentifiés)"""
     try:
         # Vérifier que l'utilisateur est authentifié
-        current_user_id = get_jwt_identity()
+        current_user_id = get_identity()
         current_user = Utilisateur.query.get(current_user_id)
         
         if not current_user_id:
@@ -228,7 +227,7 @@ def get_active_models():
 def get_models_stats():
     """Statistiques sur les modèles (admin seulement)"""
     # Vérifier que l'utilisateur est admin
-    current_user_id = get_jwt_identity()
+    current_user_id = get_identity()
     current_user = Utilisateur.query.get(current_user_id)
 
     if not current_user or current_user.type_compte != TypeCompteEnum.admin:

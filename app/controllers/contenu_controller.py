@@ -175,7 +175,7 @@ def call_gemini_api(prompt_text, api_key, model_name="gemini-2.0-flash-exp",
         except Exception as e:
             return {'type': 'error', 'content': f"Erreur Gemini: {str(e)}"}
     
-    return {'type': 'error', 'content': "Service Gemini indisponible après 3 tentatives"}
+    return {'type': 'error',    'content': "Service Gemini indisponible après 3 tentatives"}
 
 
 def call_model_api(model, prompt_text: str, temperature: float, max_tokens: int, images: list = None):

@@ -24,7 +24,7 @@ class Contenu(db.Model):
     contenu_structure = db.Column(db.JSON, nullable=True)
     meta = db.Column(db.JSON, nullable=True)
     date_creation = db.Column(db.DateTime, default=datetime.utcnow)
-    id_projet = db.Column(db.Integer, db.ForeignKey('projets.id', ondelete="SET NULL"),default=1, nullable=True)
+    id_projet = db.Column(db.Integer, db.ForeignKey('projets.id', ondelete="SET NULL"), nullable=True)
 
 
     def __repr__(self):

@@ -87,6 +87,13 @@ def create_modelIA():
         return jsonify({
             "message": "ModelIA created successfully",
             "modelIA_id": new_modelIA.id,
+            "nom_model": new_modelIA.nom_model,
+            "type_model": new_modelIA.type_model.value,
+            "fournisseur": new_modelIA.fournisseur,
+            "api_endpoint": new_modelIA.api_endpoint,
+            "parametres_default": new_modelIA.parametres_default,
+            "cout_par_token": new_modelIA.cout_par_token,
+            "actif": new_modelIA.actif
         }), 201
 
     except SQLAlchemyError as e:

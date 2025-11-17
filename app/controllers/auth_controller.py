@@ -5,8 +5,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import (
     create_access_token, 
     create_refresh_token,  
-    jwt_required, 
-    get_jwt, 
+    jwt_required,
     unset_jwt_cookies,
     set_access_cookies,
     set_refresh_cookies
@@ -39,7 +38,7 @@ def register():
         db.session.commit()
         
         access_token = create_access_token(
-            identity=new_utilisateur.id,  
+            identity=str(new_utilisateur.id),
             additional_claims={
                 'email': new_utilisateur.email,
                 'type_compte': new_utilisateur.type_compte.value
@@ -76,7 +75,6 @@ def login():
     data = request.json
     if not data or not all(key in data for key in ['email', 'mot_de_passe']):
         return jsonify({"error": "Missing required fields"}), 422  
-
     utilisateur = Utilisateur.query.filter_by(email=data['email']).first()
     
     if not utilisateur:
@@ -94,13 +92,13 @@ def login():
             db.session.commit()
 
     access_token = create_access_token(
-        identity=utilisateur.id,  
+        identity=str(utilisateur.id),
         additional_claims={
             'email': utilisateur.email,
             'type_compte': utilisateur.type_compte.value
         }
     )
-    refresh_token = create_refresh_token(identity=utilisateur.id)
+    refresh_token = create_refresh_token(identity=str(utilisateur.id))
 
     response = make_response(jsonify({
         "message": "Connexion réussie",
@@ -126,7 +124,7 @@ def login():
 @jwt_required()
 def get_me():
     try:
-        current_user_id = get_jwt_identity()
+        current_user_id = get_identity()
         utilisateur = Utilisateur.query.get(current_user_id)
         
         if not utilisateur:
@@ -151,7 +149,7 @@ def get_me():
 def refresh():
     try:
         print("🔍 Refresh endpoint called")
-        current_user_id = get_jwt_identity()
+        current_user_id = get_identity()
         print(f"🔍 User ID from refresh token: {current_user_id}")
         
         utilisateur = Utilisateur.query.get(current_user_id)
@@ -160,7 +158,7 @@ def refresh():
             return jsonify({"error": "User not found"}), 404
         
         new_access_token = create_access_token(
-            identity=current_user_id,
+            identity=str(current_user_id),
             additional_claims={
                 'email': utilisateur.email,
                 'type_compte': utilisateur.type_compte.value

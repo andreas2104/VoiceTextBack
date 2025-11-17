@@ -23,7 +23,10 @@ import atexit
 
 def create_app():
     load_dotenv()
-    app = Flask(__name__, static_folder="../../Front/out", static_url_path="/")  
+    # app = Flask(__name__, static_folder="../../Front/out", static_url_path="/")  
+    STATIC_FOLDER = os.getenv('FLASK_STATIC_FOLDER', '../../Front/out')
+    STATIC_URL_PATH = os.getenv('FLASK_STATIC_URL_PATH', '/')
+    app = Flask(__name__, static_folder=STATIC_FOLDER, static_url_path=STATIC_URL_PATH)
 
     app.url_map.strict_slashes = False
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
@@ -63,18 +66,53 @@ def create_app():
         'JWT_ALGORITHM': 'HS256',
     })
 
-    CORS(app,
-         resources={r"/api/*": {
-             "origins": [FRONTEND_URL],
-             "allow_credentials": True
-         }},
-         supports_credentials=True,
-         expose_headers=["Content-Type", "Set-Cookie"],
-         allow_headers=["Content-Type", "Authorization", "Cookie"],
-         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-         max_age=3600)
+    # CORS(app,
+    #      resources={r"/api/*": {
+    #          "origins": [FRONTEND_URL],
+    #          "allow_credentials": True
+    #      }},
+    #      supports_credentials=True,
+    #      expose_headers=["Content-Type", "Set-Cookie"],
+    #      allow_headers=["Content-Type", "Authorization", "Cookie"],
+    #      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    #      max_age=3600)
+
 
     jwt = JWTManager(app)
+
+    @app.before_request
+    def try_files_middleware():
+        app.logger.info("H", request.path)
+        # Ignore API routes
+        if request.path.startswith("/api/"):
+            return None
+
+        path = os.path.join(app.static_folder, request.path.lstrip("/"))
+        print(os.path.realpath(path))
+
+        if request.path == "/":
+            print("hello!")
+            return send_from_directory(app.static_folder, "index.html")
+
+        # Try the requested path
+        if os.path.isfile(path):
+            return send_from_directory(app.static_folder, request.path.lstrip("/"))
+
+        # Try adding .html
+        html_path = path + ".html"
+        if os.path.isfile(html_path):
+            return send_from_directory(app.static_folder, request.path.lstrip("/") + ".html")
+
+        # Try as a directory (serve index.html)
+        if os.path.isdir(path):
+            index_path = os.path.join(path, "index.html")
+            if os.path.isfile(index_path):
+                return send_from_directory(path, "index.html")
+
+        # If nothing matches, return  # Only for non-API routes
+        if not request.path.startswith("/api/"):
+            abort(404)
+
 
     @jwt.unauthorized_loader
     def unauthorized_callback(callback):
@@ -181,36 +219,6 @@ def create_app():
     #         "database": "connected"
     #     }), 200
 
-    @app.before_request
-    def try_files_middleware():
-        print("H", request.path)
-        # Ignore API routes
-        if request.path.startswith("/api/"):
-            return None
-
-        path = os.path.join(app.static_folder, request.path.lstrip("/"))
-        print(os.path.realpath(path))
-
-        if request.path == "/":
-            return send_from_directory(app.static_folder, "index.html")
-
-        # Try the requested path
-        if os.path.isfile(path):
-            return send_from_directory(app.static_folder, request.path.lstrip("/"))
-
-        # Try adding .html
-        html_path = path + ".html"
-        if os.path.isfile(html_path):
-            return send_from_directory(app.static_folder, request.path.lstrip("/") + ".html")
-
-        # Try as a directory (serve index.html)
-        if os.path.isdir(path):
-            index_path = os.path.join(path, "index.html")
-            if os.path.isfile(index_path):
-                return send_from_directory(path, "index.html")
-
-        # If nothing matches, return  # Only for non-API routes
-        if not request.path.startswith("/api/"):
-            abort(404)
+    print("HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH")
 
     return app
